@@ -1,11 +1,8 @@
 PACKAGE=sqlitetalk
+PYTHON?=python3
 D3_VERSION=v4.2.5
 REVEAL_JS_VERSION=3.3.0
 REVEAL_JS_TARBALL=$(REVEAL_JS_VERSION).tar.gz
-FOSSIL_VERSION=1.35
-FOSSIL_TARBALL=fossil-src-$(FOSSIL_VERSION).tar.gz
-FOSSIL_DIR=fossil-$(FOSSIL_VERSION)
-FOSSIL_INSTALL_PATH=/Users/svanellewee/appz/fossil-alt
 DOOM_SHAREWARE=doom1.wad  # according to the fan-site https://doomwiki.org/wiki/DOOM1.WAD this is the Legit Shareware version
 
 directories:
@@ -41,6 +38,9 @@ clean: clean-dirs
 clean-dirs:
 	rm -fr depdir
 	rm -fr revealjs
+	rm -fr d3
 	rm -fr *~
 	rm -fr *gz
 
+presentation:
+	$(PYTHON) -m http.server

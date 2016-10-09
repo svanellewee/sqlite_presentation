@@ -644,7 +644,7 @@ VALUES (?)
       GROUP BY idProduct;
         """)
         for product_id, supplier_string in cursor:
-             yield (product_id, supplier_strring.split(',')
+             yield (product_id, supplier_string.split(',')
 			    
     def main(code_name, file_name, run_id):
         with sqlite3.connect(":memory:") as conn:
