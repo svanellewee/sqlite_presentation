@@ -31,7 +31,7 @@ revealjs: | ./depdir/$(REVEAL_JS_TARBALL)
 d3js: | ./depdir/d3.zip
 	unzip ./depdir/d3.zip -d d3
 
-deps:  directories revealjs d3js
+deps:  directories revealjs d3js doomshareware
 
 clean: clean-dirs
 

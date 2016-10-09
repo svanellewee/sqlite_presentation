@@ -1,0 +1,1693 @@
+#+TITLE: Doom demo code
+
+:TODO: REMEMBER TO ADD THE C-structs!!!
+:TODO: would extracting images from SQLite(from wad) be easy?
+:TODO: read more about sharedStrings https://msdn.microsoft.com/en-us/library/office/gg278314.aspx in terms of references in files.
+:TODO: quick blurp on Vertexes linedefs and Doom being 2D not 3D
+:TODO: line segment "recursive"?  http://zdoom.org/wiki/Segment
+SQLite as application file format, a study.
+
+My understanding of an application file format is a file format/directory structure that is used to persist the data/state of the application after it's no longer running.
+Examples of this would include
+- Word/Excel/Powerpoint documents 
+- WAD files
+- Git's .git directory/ Mercurial's .hg directory
+
+** COMMENT Example:
+
+*** XLSX files are zipped directories of XMLs that reference each other.
+:TODO: Pythonize it up ?
+#+BEGIN_SRC bash
+└─▪ unzip some_excel_file.xlsx 
+Archive:  some_excel_file.xlsx
+  inflating: [Content_Types].xml     
+  inflating: _rels/.rels             
+  inflating: xl/_rels/workbook.xml.rels  
+  inflating: xl/workbook.xml         
+  inflating: xl/styles.xml           
+  inflating: xl/worksheets/_rels/sheet1.xml.rels  
+  inflating: xl/theme/theme1.xml     
+  inflating: xl/worksheets/sheet1.xml  
+  inflating: xl/sharedStrings.xml    
+  inflating: docProps/app.xml        
+  inflating: xl/externalLinks/_rels/externalLink1.xml.rels  
+  inflating: xl/externalLinks/externalLink1.xml  
+  inflating: xl/printerSettings/printerSettings1.bin  
+  inflating: docProps/core.xml    
+#+END_SRC
+
+If you look at "[Content_types].xml" you'll see it's referencing other xml files inside this archive.
+#+BEGIN_SRC xml
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>                                                                                                                   
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">                                                                                              
+  <Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.printerSettings"/>                                                    
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>                                                                      
+  <Default Extension="xml" ContentType="application/xml"/>                                                                                                                
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>                                        
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>                                
+  <Override PartName="/xl/externalLinks/externalLink1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml"/>                   
+  <Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>                                                       
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>                                              
+  <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>                                
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>                                                      
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>                                            
+</Types>                                                                                                                                                                  
+                
+#+END_SRC
+
+This could also have been a sql table
+#+BEGIN_SRC sqlite
+  -- CREATE TABLE Content (  
+  --    content_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  --    content_type_id REFERENCES ContentTypes(type_id),  -- extension, partname, etc
+  --    name VARCHAR(10),
+   
+  -- );
+
+  -- INSERT INTO Override_PartName (part_id, part_name, content_type) 
+  -- VALUES (1, '/xl/workbook.xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml'),
+  --        (2, '/xl/worksheets/sheet1.xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml'),  -- actual reference to a sheet
+  --        (3, '/xl/externalLinks/externalLink1.xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.externalLink+xml'),
+  --        (4, '/xl/theme/theme1.xml', 'application/vnd.openxmlformats-officedocument.theme+xml'),
+  --        (5, '/xl/styles.xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml'),
+  --        (6, '/xl/sharedStrings.xml', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml'),
+  --        (7, '/docProps/core.xml', 'application/vnd.openxmlformats-package.core-properties+xml'),
+  --        (8, '/docProps/app.xml', 'application/vnd.openxmlformats-officedocument.extended-properties+xml');
+
+#+END_SRC
+
+Similarly the worksheets themselves consists of 2 xml files that together produces the actual workbook 
+- sharedStrings.xml file (just the strings that exist in the document)
+- sheets.xml file that just references sharedStrings.xml 
+Read more here https://msdn.microsoft.com/en-us/library/office/gg278314.aspx
+
+From https://msdn.microsoft.com/en-us/library/office/gg278314.aspx:
+#+BEGIN_EXAMPLE txt
+  Shared strings optimize space requirements when the spreadsheet contains multiple instances of the same string.
+  Spreadsheets that contain business or analytical data often contain repeating strings.
+  If these strings were stored using inline string markup, the same markup would appear over and over in the worksheet. 
+#+END_EXAMPLE
+
+(the values *relate* to each other)
+#+BEGIN_SRC xml
+  <sheetData>
+    <row r="1" spans="1:2" s="3" customFormat="1" x14ac:dyDescent="0.3">
+      <c r="A1" s="4" t="s">
+	<v>0</v>
+      </c>
+      <c r="B1" s="5" t="s">
+	<v>1</v>
+      </c>
+    </row>
+    <row r="2" spans="1:2" x14ac:dyDescent="0.3">
+      <c r="A2" s="1">
+	<v>9780141373027</v>
+      </c>
+      <c r="B2" t="s">
+	<v>2</v>
+      </c>
+    </row>
+    <row r="3" spans="1:2" x14ac:dyDescent="0.3">
+      <c r="A3" s="1">
+	<v>9781405283434</v>
+      </c>
+      <c r="B3" t="s">
+	<v>3</v>
+      </c>
+    </row>
+    <row r="4" spans="1:2" x14ac:dyDescent="0.3">
+      <c r="A4" s="1">
+	<v>9780141371146</v>
+      </c>
+      <c r="B4" t="s">
+	<v>4</v>
+      </c>
+    </row>
+    <row r="5" spans="1:2" x14ac:dyDescent="0.3">
+      <c r="A5" s="1">
+	<v>9780141374482</v>
+      </c>
+      <c r="B5" t="s">
+	<v>5</v>
+      </c>
+    </row>
+
+#+END_SRC
+
+In sheet1.xml
+#+BEGIN_SRC xml
+  <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+  <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="238" uniqueCount="238">
+    <si>
+      <t>ISBN</t>
+    </si>
+    <si>
+      <t>PRODUCT TITLE</t>
+    </si>
+    <si>
+      <t xml:space="preserve">Diary of Wimpy Kid 11: Double Down </t>
+    </si>
+    <si>
+      <t>Disney Finding Dory Annual 2017 HB</t>
+    </si>
+    <si>
+      <t>BFG Colour Edition PB</t>
+    </si>
+    <si>
+      <t>Tales of the Peculiar TPB</t>
+    </si>
+    <si>
+      <t>Tales of the Peculiar HB</t>
+    </si>
+    <si>
+      <t>Middle School 01: Worst Years of my Life Film Tie In PB</t>
+    </si>
+  .....
+#+END_SRC
+
+** Git's layout
+   https://git-scm.com/docs/gitrepository-layout
+   - Blobs?
+   - commit log ?
+
+** Problems with this
+   - Do we always need to re-create the wheel?
+   - Custom file access code means more maintenance you as the developer has to do.
+
+** Outro
+   For the next example, I have taken an existing application file format, converted it to a SQLite database
+
+* Doom example in ernest.
+  This refers to the game DOOM by Id Software 
+  - Came out in 1993.
+  - SQLite's initial release was only 7 years later
+  - Uses the WAD file (Where's All the Data) to store all game information
+  - Level data stored in 2D.
+
+** Explain about Vertexes and Lines :TODO:
+   - WAD files store 2D information (yes Doom wasn't really a 3D game, it was just very clever in it's representation)
+** Why would SQLite have made a good game data storage format?
+   - BLOBS for sprites, textures
+   - Referential integrity is actually enforced in WAD's
+   - Data access is basically cabal of C-structs and file access tricks.
+     - You should still go read the source yourself!
+
+** SQL makes for a nice data access API
+   Here is an example of how I believe the original developers of Doom would have liked to access there file data, if they had known SQL
+
+   - Getting the bounds of a level:
+   #+BEGIN_SRC sqlite
+     SELECT
+         MIN(x),
+         MIN(y),
+         MAX(x) - MIN(x) as width,
+         MAX(y) - MIN(y) as height
+     FROM Vertex  -- A list of all level vertices
+   #+END_SRC
+
+   - Getting vertexes to draw the map
+   #+BEGIN_SRC sqlite
+     SELECT
+       v1.x,    -- vertex 1
+       v1.y, 
+       v2.x,    -- vertex 2
+       v2.y
+     FROM Line ld
+     INNER JOIN Vertex v1 ON v1.vertex_id=ld.v1
+     INNER JOIN Vertex v2 ON v2.vertex_id=ld.v2;
+   #+END_SRC
+
+   - With this in mind I checked out how WAD data is stored.
+     - Brace Yourselves! It's very complicated!
+       - Header indicates where the "Data Index offset" lives
+	 #+begin_example
+           6 IndexEntry(position=67500, size=0, name=b'E1M1\x00\x00\x00\x00')
+           7 IndexEntry(position=67500, size=1380, name=b'THINGS\x00\x00')
+           8 IndexEntry(position=68880, size=6650, name=b'LINEDEFS')  -----------> the Walls of the map == lines 2D map
+           9 IndexEntry(position=75532, size=19440, name=b'SIDEDEFS')
+           10 IndexEntry(position=94972, size=1868, name=b'VERTEXES') -----------> the start and endpoitns of walls
+           11 IndexEntry(position=96840, size=8784, name=b'SEGS\x00\x00\x00\x00')
+           12 IndexEntry(position=105624, size=948, name=b'SSECTORS')
+           13 IndexEntry(position=106572, size=6608, name=b'NODES\x00\x00\x00')
+           14 IndexEntry(position=113180, size=2210, name=b'SECTORS\x00')
+           15 IndexEntry(position=115392, size=904, name=b'REJECT\x00\x00')
+           16 IndexEntry(position=116296, size=6922, name=b'BLOCKMAP')
+         #+end_example
+
+     
+   #+BEGIN_SRC  python :python ./virtualenv/bin/python :tangle draw_level.py :results output :noweb yes
+     import collections
+     import svgwrite
+     import level
+     from vertex import Vertex
+
+     Box = collections.namedtuple("Box", "min_x min_y width height")
+
+     def get_level_bounding_box():
+         level.build_level_data()
+         with level.awesome_manager("leveldata.db") as conn:
+             cursor = conn.execute("""
+             SELECT
+                 MIN(x),
+                 MIN(y),
+                 MAX(x) - MIN(x) as width,
+                 MAX(y) - MIN(y) as height
+             FROM Vertex
+             """)
+             return Box._make(cursor.fetchone())
+
+     def get_lines():
+         #import pdb; pdb.set_trace()
+         level.build_level_data()
+         with level.awesome_manager("leveldata.db") as conn:
+             cursor = conn.execute("""
+             SELECT
+               ld.line_id,
+               v1.vertex_id,
+               v1.x,
+               v1.y,
+               v2.vertex_id,
+               v2.x,
+               v2.y
+             FROM Line ld
+             INNER JOIN Vertex v1 ON v1.vertex_id=ld.v1
+             INNER JOIN Vertex v2 ON v2.vertex_id=ld.v2;
+             """)
+             def unpack(result):
+                 line_id, *vertexes = result
+                 return line_id, Vertex._make(vertexes[:3]), Vertex._make(vertexes[3:])
+        
+             yield from (unpack(result) for result in cursor)
+
+     def middle(vertex1, vertex2):
+         v1x, v1y = vertex1
+         v2x, v2y = vertex2
+         return ((v1x + v2x) / 2,
+                 (v1y + v2y) / 2)
+
+     def draw_level(drawing, lines, box=None):
+         if box:
+            drawing.viewbox(*box)
+         stroke = svgwrite.rgb(10, 16, 16, '%')
+
+         for line_id, vertex1, vertex2 in lines:
+             print(vertex1, vertex2)
+             drawing.add(drawing.line(vertex1[1:],
+                                      vertex2[1:],
+                                      stroke=stroke,
+				      stroke_width=15))
+             drawing.add(drawing.text('v{}'.format(vertex1.vertex_id), insert=vertex1[1:], fill='blue'))
+             drawing.add(drawing.text('L{}'.format(line_id), insert=middle(vertex1[1:], vertex2[1:]), fill='green'))
+             drawing.add(drawing.text('v{}'.format(vertex2.vertex_id), insert=vertex2[1:]))
+
+
+     def main():
+         box = get_level_bounding_box()
+         print(box)
+         lines = get_lines()
+         drawing = svgwrite.Drawing("example.svg", profile="full", debug=True)
+         draw_level(drawing, lines, box)
+         drawing.add(drawing.text('TestMap', insert=(0, 10), fill='red'))
+         drawing.save()
+
+     if __name__ == "__main__":
+         main()
+   #+END_SRC
+
+   #+RESULTS:
+   #+begin_example
+   Box(min_x=-768, min_y=-4864, width=4576, height=2816)
+   Vertex(vertex_id=0, x=1088, y=-3680) Vertex(vertex_id=1, x=1024, y=-3680)
+   Vertex(vertex_id=1, x=1024, y=-3680) Vertex(vertex_id=2, x=1024, y=-3648)
+   Vertex(vertex_id=3, x=1088, y=-3648) Vertex(vertex_id=0, x=1088, y=-3680)
+   Vertex(vertex_id=4, x=1152, y=-3648) Vertex(vertex_id=3, x=1088, y=-3648)
+   Vertex(vertex_id=2, x=1024, y=-3648) Vertex(vertex_id=5, x=960, y=-3648)
+   Vertex(vertex_id=6, x=1280, y=-3552) Vertex(vertex_id=4, x=1152, y=-3648)
+   Vertex(vertex_id=5, x=960, y=-3648) Vertex(vertex_id=7, x=832, y=-3552)
+   Vertex(vertex_id=8, x=1344, y=-3552) Vertex(vertex_id=6, x=1280, y=-3552)
+   Vertex(vertex_id=7, x=832, y=-3552) Vertex(vertex_id=9, x=704, y=-3552)
+   Vertex(vertex_id=10, x=896, y=-3392) Vertex(vertex_id=11, x=928, y=-3392)
+   Vertex(vertex_id=11, x=928, y=-3392) Vertex(vertex_id=12, x=928, y=-3360)
+   Vertex(vertex_id=12, x=928, y=-3360) Vertex(vertex_id=13, x=896, y=-3360)
+   Vertex(vertex_id=13, x=896, y=-3360) Vertex(vertex_id=10, x=896, y=-3392)
+   Vertex(vertex_id=14, x=1184, y=-3392) Vertex(vertex_id=15, x=1216, y=-3392)
+   Vertex(vertex_id=15, x=1216, y=-3392) Vertex(vertex_id=16, x=1216, y=-3360)
+   Vertex(vertex_id=16, x=1216, y=-3360) Vertex(vertex_id=17, x=1184, y=-3360)
+   Vertex(vertex_id=17, x=1184, y=-3360) Vertex(vertex_id=14, x=1184, y=-3392)
+   Vertex(vertex_id=18, x=896, y=-3072) Vertex(vertex_id=19, x=896, y=-3104)
+   Vertex(vertex_id=19, x=896, y=-3104) Vertex(vertex_id=20, x=928, y=-3104)
+   Vertex(vertex_id=20, x=928, y=-3104) Vertex(vertex_id=21, x=928, y=-3072)
+   Vertex(vertex_id=21, x=928, y=-3072) Vertex(vertex_id=18, x=896, y=-3072)
+   Vertex(vertex_id=22, x=1216, y=-3072) Vertex(vertex_id=23, x=1184, y=-3072)
+   Vertex(vertex_id=23, x=1184, y=-3072) Vertex(vertex_id=24, x=1184, y=-3104)
+   Vertex(vertex_id=24, x=1184, y=-3104) Vertex(vertex_id=25, x=1216, y=-3104)
+   Vertex(vertex_id=25, x=1216, y=-3104) Vertex(vertex_id=22, x=1216, y=-3072)
+   Vertex(vertex_id=26, x=1344, y=-3360) Vertex(vertex_id=8, x=1344, y=-3552)
+   Vertex(vertex_id=27, x=1344, y=-3264) Vertex(vertex_id=26, x=1344, y=-3360)
+   Vertex(vertex_id=28, x=1344, y=-3200) Vertex(vertex_id=27, x=1344, y=-3264)
+   Vertex(vertex_id=29, x=1344, y=-2880) Vertex(vertex_id=30, x=1344, y=-3104)
+   Vertex(vertex_id=30, x=1344, y=-3104) Vertex(vertex_id=28, x=1344, y=-3200)
+   Vertex(vertex_id=31, x=1376, y=-3200) Vertex(vertex_id=32, x=1376, y=-3104)
+   Vertex(vertex_id=33, x=1376, y=-3360) Vertex(vertex_id=34, x=1376, y=-3264)
+   Vertex(vertex_id=27, x=1344, y=-3264) Vertex(vertex_id=34, x=1376, y=-3264)
+   Vertex(vertex_id=33, x=1376, y=-3360) Vertex(vertex_id=26, x=1344, y=-3360)
+   Vertex(vertex_id=31, x=1376, y=-3200) Vertex(vertex_id=28, x=1344, y=-3200)
+   Vertex(vertex_id=30, x=1344, y=-3104) Vertex(vertex_id=32, x=1376, y=-3104)
+   Vertex(vertex_id=34, x=1376, y=-3264) Vertex(vertex_id=31, x=1376, y=-3200)
+   Vertex(vertex_id=35, x=1376, y=-3648) Vertex(vertex_id=33, x=1376, y=-3360)
+   Vertex(vertex_id=32, x=1376, y=-3104) Vertex(vertex_id=36, x=1376, y=-2944)
+   Vertex(vertex_id=14, x=1184, y=-3392) Vertex(vertex_id=11, x=928, y=-3392)
+   Vertex(vertex_id=26, x=1344, y=-3360) Vertex(vertex_id=15, x=1216, y=-3392)
+   Vertex(vertex_id=22, x=1216, y=-3072) Vertex(vertex_id=30, x=1344, y=-3104)
+   Vertex(vertex_id=37, x=704, y=-2944) Vertex(vertex_id=38, x=832, y=-2944)
+   Vertex(vertex_id=38, x=832, y=-2944) Vertex(vertex_id=39, x=968, y=-2880)
+   Vertex(vertex_id=39, x=968, y=-2880) Vertex(vertex_id=40, x=1216, y=-2880)
+   Vertex(vertex_id=36, x=1376, y=-2944) Vertex(vertex_id=41, x=1472, y=-2880)
+   Vertex(vertex_id=41, x=1472, y=-2880) Vertex(vertex_id=42, x=1856, y=-2880)
+   Vertex(vertex_id=43, x=1528, y=-3680) Vertex(vertex_id=35, x=1376, y=-3648)
+   Vertex(vertex_id=44, x=1672, y=-3744) Vertex(vertex_id=43, x=1528, y=-3680)
+   Vertex(vertex_id=3, x=1088, y=-3648) Vertex(vertex_id=2, x=1024, y=-3648)
+   Vertex(vertex_id=20, x=928, y=-3104) Vertex(vertex_id=24, x=1184, y=-3104)
+   Vertex(vertex_id=17, x=1184, y=-3360) Vertex(vertex_id=12, x=928, y=-3360)
+   Vertex(vertex_id=12, x=928, y=-3360) Vertex(vertex_id=20, x=928, y=-3104)
+   Vertex(vertex_id=13, x=896, y=-3360) Vertex(vertex_id=19, x=896, y=-3104)
+   Vertex(vertex_id=21, x=928, y=-3072) Vertex(vertex_id=23, x=1184, y=-3072)
+   Vertex(vertex_id=9, x=704, y=-3552) Vertex(vertex_id=45, x=704, y=-3360)
+   Vertex(vertex_id=46, x=704, y=-3104) Vertex(vertex_id=37, x=704, y=-2944)
+   Vertex(vertex_id=46, x=704, y=-3104) Vertex(vertex_id=45, x=704, y=-3360)
+   Vertex(vertex_id=47, x=512, y=-3328) Vertex(vertex_id=48, x=512, y=-3304)
+   Vertex(vertex_id=49, x=512, y=-3160) Vertex(vertex_id=50, x=512, y=-3136)
+   Vertex(vertex_id=50, x=512, y=-3136) Vertex(vertex_id=51, x=680, y=-3104)
+   Vertex(vertex_id=51, x=680, y=-3104) Vertex(vertex_id=46, x=704, y=-3104)
+   Vertex(vertex_id=45, x=704, y=-3360) Vertex(vertex_id=52, x=680, y=-3360)
+   Vertex(vertex_id=52, x=680, y=-3360) Vertex(vertex_id=47, x=512, y=-3328)
+   Vertex(vertex_id=53, x=496, y=-3160) Vertex(vertex_id=54, x=496, y=-3304)
+   Vertex(vertex_id=48, x=512, y=-3304) Vertex(vertex_id=54, x=496, y=-3304)
+   Vertex(vertex_id=53, x=496, y=-3160) Vertex(vertex_id=49, x=512, y=-3160)
+   Vertex(vertex_id=54, x=496, y=-3304) Vertex(vertex_id=55, x=496, y=-3328)
+   Vertex(vertex_id=55, x=496, y=-3328) Vertex(vertex_id=56, x=448, y=-3456)
+   Vertex(vertex_id=56, x=448, y=-3456) Vertex(vertex_id=57, x=128, y=-3456)
+   Vertex(vertex_id=58, x=128, y=-3008) Vertex(vertex_id=59, x=448, y=-3008)
+   Vertex(vertex_id=60, x=496, y=-3136) Vertex(vertex_id=53, x=496, y=-3160)
+   Vertex(vertex_id=59, x=448, y=-3008) Vertex(vertex_id=60, x=496, y=-3136)
+   Vertex(vertex_id=61, x=128, y=-3264) Vertex(vertex_id=62, x=160, y=-3264)
+   Vertex(vertex_id=62, x=160, y=-3264) Vertex(vertex_id=63, x=192, y=-3264)
+   Vertex(vertex_id=63, x=192, y=-3264) Vertex(vertex_id=64, x=224, y=-3264)
+   Vertex(vertex_id=64, x=224, y=-3264) Vertex(vertex_id=65, x=256, y=-3264)
+   Vertex(vertex_id=65, x=256, y=-3264) Vertex(vertex_id=66, x=288, y=-3264)
+   Vertex(vertex_id=66, x=288, y=-3264) Vertex(vertex_id=67, x=320, y=-3264)
+   Vertex(vertex_id=67, x=320, y=-3264) Vertex(vertex_id=68, x=320, y=-3200)
+   Vertex(vertex_id=68, x=320, y=-3200) Vertex(vertex_id=69, x=288, y=-3200)
+   Vertex(vertex_id=69, x=288, y=-3200) Vertex(vertex_id=70, x=256, y=-3200)
+   Vertex(vertex_id=70, x=256, y=-3200) Vertex(vertex_id=71, x=224, y=-3200)
+   Vertex(vertex_id=71, x=224, y=-3200) Vertex(vertex_id=72, x=192, y=-3200)
+   Vertex(vertex_id=72, x=192, y=-3200) Vertex(vertex_id=73, x=160, y=-3200)
+   Vertex(vertex_id=73, x=160, y=-3200) Vertex(vertex_id=74, x=128, y=-3200)
+   Vertex(vertex_id=62, x=160, y=-3264) Vertex(vertex_id=73, x=160, y=-3200)
+   Vertex(vertex_id=63, x=192, y=-3264) Vertex(vertex_id=72, x=192, y=-3200)
+   Vertex(vertex_id=64, x=224, y=-3264) Vertex(vertex_id=71, x=224, y=-3200)
+   Vertex(vertex_id=65, x=256, y=-3264) Vertex(vertex_id=70, x=256, y=-3200)
+   Vertex(vertex_id=66, x=288, y=-3264) Vertex(vertex_id=69, x=288, y=-3200)
+   Vertex(vertex_id=61, x=128, y=-3264) Vertex(vertex_id=74, x=128, y=-3200)
+   Vertex(vertex_id=74, x=128, y=-3200) Vertex(vertex_id=75, x=64, y=-3072)
+   Vertex(vertex_id=75, x=64, y=-3072) Vertex(vertex_id=58, x=128, y=-3008)
+   Vertex(vertex_id=57, x=128, y=-3456) Vertex(vertex_id=76, x=64, y=-3392)
+   Vertex(vertex_id=76, x=64, y=-3392) Vertex(vertex_id=61, x=128, y=-3264)
+   Vertex(vertex_id=76, x=64, y=-3392) Vertex(vertex_id=77, x=48, y=-3392)
+   Vertex(vertex_id=77, x=48, y=-3392) Vertex(vertex_id=78, x=-64, y=-3328)
+   Vertex(vertex_id=79, x=-64, y=-3136) Vertex(vertex_id=80, x=48, y=-3072)
+   Vertex(vertex_id=80, x=48, y=-3072) Vertex(vertex_id=75, x=64, y=-3072)
+   Vertex(vertex_id=81, x=-256, y=-3328) Vertex(vertex_id=82, x=-320, y=-3296)
+   Vertex(vertex_id=83, x=-320, y=-3168) Vertex(vertex_id=84, x=-256, y=-3136)
+   Vertex(vertex_id=85, x=-128, y=-3120) Vertex(vertex_id=86, x=-128, y=-3136)
+   Vertex(vertex_id=84, x=-256, y=-3136) Vertex(vertex_id=87, x=-256, y=-3120)
+   Vertex(vertex_id=88, x=-256, y=-3344) Vertex(vertex_id=81, x=-256, y=-3328)
+   Vertex(vertex_id=89, x=-128, y=-3328) Vertex(vertex_id=90, x=-128, y=-3344)
+   Vertex(vertex_id=82, x=-320, y=-3296) Vertex(vertex_id=91, x=-336, y=-3296)
+   Vertex(vertex_id=92, x=-336, y=-3168) Vertex(vertex_id=83, x=-320, y=-3168)
+   Vertex(vertex_id=87, x=-256, y=-3120) Vertex(vertex_id=93, x=-336, y=-3120)
+   Vertex(vertex_id=93, x=-336, y=-3120) Vertex(vertex_id=92, x=-336, y=-3168)
+   Vertex(vertex_id=91, x=-336, y=-3296) Vertex(vertex_id=94, x=-336, y=-3344)
+   Vertex(vertex_id=94, x=-336, y=-3344) Vertex(vertex_id=88, x=-256, y=-3344)
+   Vertex(vertex_id=90, x=-128, y=-3344) Vertex(vertex_id=95, x=-96, y=-3344)
+   Vertex(vertex_id=95, x=-96, y=-3344) Vertex(vertex_id=96, x=64, y=-3520)
+   Vertex(vertex_id=97, x=-96, y=-3120) Vertex(vertex_id=85, x=-128, y=-3120)
+   Vertex(vertex_id=98, x=64, y=-2944) Vertex(vertex_id=97, x=-96, y=-3120)
+   Vertex(vertex_id=79, x=-64, y=-3136) Vertex(vertex_id=78, x=-64, y=-3328)
+   Vertex(vertex_id=89, x=-128, y=-3328) Vertex(vertex_id=81, x=-256, y=-3328)
+   Vertex(vertex_id=88, x=-256, y=-3344) Vertex(vertex_id=90, x=-128, y=-3344)
+   Vertex(vertex_id=84, x=-256, y=-3136) Vertex(vertex_id=86, x=-128, y=-3136)
+   Vertex(vertex_id=85, x=-128, y=-3120) Vertex(vertex_id=87, x=-256, y=-3120)
+   Vertex(vertex_id=82, x=-320, y=-3296) Vertex(vertex_id=83, x=-320, y=-3168)
+   Vertex(vertex_id=92, x=-336, y=-3168) Vertex(vertex_id=91, x=-336, y=-3296)
+   Vertex(vertex_id=99, x=64, y=-2816) Vertex(vertex_id=98, x=64, y=-2944)
+   Vertex(vertex_id=96, x=64, y=-3520) Vertex(vertex_id=100, x=64, y=-3648)
+   Vertex(vertex_id=100, x=64, y=-3648) Vertex(vertex_id=101, x=-640, y=-3648)
+   Vertex(vertex_id=101, x=-640, y=-3648) Vertex(vertex_id=102, x=-768, y=-3520)
+   Vertex(vertex_id=102, x=-768, y=-3520) Vertex(vertex_id=103, x=-768, y=-2944)
+   Vertex(vertex_id=103, x=-768, y=-2944) Vertex(vertex_id=104, x=-640, y=-2816)
+   Vertex(vertex_id=104, x=-640, y=-2816) Vertex(vertex_id=99, x=64, y=-2816)
+   Vertex(vertex_id=100, x=64, y=-3648) Vertex(vertex_id=105, x=-640, y=-3520)
+   Vertex(vertex_id=105, x=-640, y=-3520) Vertex(vertex_id=106, x=-640, y=-2944)
+   Vertex(vertex_id=106, x=-640, y=-2944) Vertex(vertex_id=99, x=64, y=-2816)
+   Vertex(vertex_id=86, x=-128, y=-3136) Vertex(vertex_id=107, x=-88, y=-3136)
+   Vertex(vertex_id=107, x=-88, y=-3136) Vertex(vertex_id=79, x=-64, y=-3136)
+   Vertex(vertex_id=78, x=-64, y=-3328) Vertex(vertex_id=108, x=-88, y=-3328)
+   Vertex(vertex_id=108, x=-88, y=-3328) Vertex(vertex_id=89, x=-128, y=-3328)
+   Vertex(vertex_id=109, x=256, y=-3136) Vertex(vertex_id=110, x=320, y=-3136)
+   Vertex(vertex_id=110, x=320, y=-3136) Vertex(vertex_id=111, x=320, y=-3072)
+   Vertex(vertex_id=111, x=320, y=-3072) Vertex(vertex_id=112, x=256, y=-3072)
+   Vertex(vertex_id=112, x=256, y=-3072) Vertex(vertex_id=109, x=256, y=-3136)
+   Vertex(vertex_id=113, x=256, y=-3392) Vertex(vertex_id=114, x=320, y=-3392)
+   Vertex(vertex_id=114, x=320, y=-3392) Vertex(vertex_id=115, x=320, y=-3328)
+   Vertex(vertex_id=115, x=320, y=-3328) Vertex(vertex_id=116, x=256, y=-3328)
+   Vertex(vertex_id=116, x=256, y=-3328) Vertex(vertex_id=113, x=256, y=-3392)
+   Vertex(vertex_id=40, x=1216, y=-2880) Vertex(vertex_id=117, x=1248, y=-2528)
+   Vertex(vertex_id=118, x=1384, y=-2592) Vertex(vertex_id=29, x=1344, y=-2880)
+   Vertex(vertex_id=119, x=1472, y=-2560) Vertex(vertex_id=118, x=1384, y=-2592)
+   Vertex(vertex_id=117, x=1248, y=-2528) Vertex(vertex_id=120, x=1472, y=-2432)
+   Vertex(vertex_id=29, x=1344, y=-2880) Vertex(vertex_id=40, x=1216, y=-2880)
+   Vertex(vertex_id=120, x=1472, y=-2432) Vertex(vertex_id=119, x=1472, y=-2560)
+   Vertex(vertex_id=121, x=1536, y=-2432) Vertex(vertex_id=122, x=1536, y=-2560)
+   Vertex(vertex_id=123, x=1552, y=-2560) Vertex(vertex_id=124, x=1552, y=-2432)
+   Vertex(vertex_id=122, x=1536, y=-2560) Vertex(vertex_id=119, x=1472, y=-2560)
+   Vertex(vertex_id=120, x=1472, y=-2432) Vertex(vertex_id=121, x=1536, y=-2432)
+   Vertex(vertex_id=121, x=1536, y=-2432) Vertex(vertex_id=124, x=1552, y=-2432)
+   Vertex(vertex_id=123, x=1552, y=-2560) Vertex(vertex_id=122, x=1536, y=-2560)
+   Vertex(vertex_id=125, x=1664, y=-2560) Vertex(vertex_id=123, x=1552, y=-2560)
+   Vertex(vertex_id=124, x=1552, y=-2432) Vertex(vertex_id=126, x=1664, y=-2432)
+   Vertex(vertex_id=127, x=2736, y=-3648) Vertex(vertex_id=128, x=2488, y=-3744)
+   Vertex(vertex_id=128, x=2488, y=-3744) Vertex(vertex_id=129, x=2240, y=-3776)
+   Vertex(vertex_id=130, x=1984, y=-3776) Vertex(vertex_id=44, x=1672, y=-3744)
+   Vertex(vertex_id=42, x=1856, y=-2880) Vertex(vertex_id=131, x=1920, y=-2920)
+   Vertex(vertex_id=131, x=1920, y=-2920) Vertex(vertex_id=132, x=2240, y=-2920)
+   Vertex(vertex_id=133, x=1520, y=-3168) Vertex(vertex_id=134, x=1672, y=-3104)
+   Vertex(vertex_id=134, x=1672, y=-3104) Vertex(vertex_id=135, x=1896, y=-3104)
+   Vertex(vertex_id=135, x=1896, y=-3104) Vertex(vertex_id=136, x=2040, y=-3144)
+   Vertex(vertex_id=136, x=2040, y=-3144) Vertex(vertex_id=137, x=2128, y=-3272)
+   Vertex(vertex_id=137, x=2128, y=-3272) Vertex(vertex_id=138, x=2064, y=-3408)
+   Vertex(vertex_id=138, x=2064, y=-3408) Vertex(vertex_id=139, x=1784, y=-3448)
+   Vertex(vertex_id=139, x=1784, y=-3448) Vertex(vertex_id=140, x=1544, y=-3384)
+   Vertex(vertex_id=140, x=1544, y=-3384) Vertex(vertex_id=133, x=1520, y=-3168)
+   Vertex(vertex_id=141, x=2752, y=-2784) Vertex(vertex_id=142, x=2624, y=-2784)
+   Vertex(vertex_id=143, x=2520, y=-2560) Vertex(vertex_id=144, x=2752, y=-2560)
+   Vertex(vertex_id=144, x=2752, y=-2560) Vertex(vertex_id=145, x=2944, y=-2656)
+   Vertex(vertex_id=146, x=2880, y=-2912) Vertex(vertex_id=147, x=2880, y=-2880)
+   Vertex(vertex_id=148, x=3048, y=-2880) Vertex(vertex_id=149, x=3048, y=-2944)
+   Vertex(vertex_id=150, x=2752, y=-3048) Vertex(vertex_id=151, x=2752, y=-2912)
+   Vertex(vertex_id=152, x=2752, y=-3584) Vertex(vertex_id=153, x=2752, y=-3360)
+   Vertex(vertex_id=154, x=2736, y=-3360) Vertex(vertex_id=127, x=2736, y=-3648)
+   Vertex(vertex_id=153, x=2752, y=-3360) Vertex(vertex_id=154, x=2736, y=-3360)
+   Vertex(vertex_id=149, x=3048, y=-2944) Vertex(vertex_id=155, x=3304, y=-3040)
+   Vertex(vertex_id=156, x=3136, y=-3072) Vertex(vertex_id=155, x=3304, y=-3040)
+   Vertex(vertex_id=157, x=3112, y=-3360) Vertex(vertex_id=158, x=2944, y=-3536)
+   Vertex(vertex_id=159, x=2816, y=-3232) Vertex(vertex_id=157, x=3112, y=-3360)
+   Vertex(vertex_id=160, x=3280, y=-3320) Vertex(vertex_id=161, x=2984, y=-3200)
+   Vertex(vertex_id=162, x=2976, y=-3072) Vertex(vertex_id=159, x=2816, y=-3232)
+   Vertex(vertex_id=161, x=2984, y=-3200) Vertex(vertex_id=156, x=3136, y=-3072)
+   Vertex(vertex_id=163, x=3264, y=-3616) Vertex(vertex_id=164, x=3072, y=-3648)
+   Vertex(vertex_id=165, x=2944, y=-3648) Vertex(vertex_id=152, x=2752, y=-3584)
+   Vertex(vertex_id=164, x=3072, y=-3648) Vertex(vertex_id=166, x=3072, y=-4000)
+   Vertex(vertex_id=167, x=2944, y=-3776) Vertex(vertex_id=165, x=2944, y=-3648)
+   Vertex(vertex_id=141, x=2752, y=-2784) Vertex(vertex_id=145, x=2944, y=-2656)
+   Vertex(vertex_id=153, x=2752, y=-3360) Vertex(vertex_id=158, x=2944, y=-3536)
+   Vertex(vertex_id=158, x=2944, y=-3536) Vertex(vertex_id=164, x=3072, y=-3648)
+   Vertex(vertex_id=150, x=2752, y=-3048) Vertex(vertex_id=148, x=3048, y=-2880)
+   Vertex(vertex_id=158, x=2944, y=-3536) Vertex(vertex_id=152, x=2752, y=-3584)
+   Vertex(vertex_id=168, x=3104, y=-3552) Vertex(vertex_id=160, x=3280, y=-3320)
+   Vertex(vertex_id=163, x=3264, y=-3616) Vertex(vertex_id=168, x=3104, y=-3552)
+   Vertex(vertex_id=169, x=3352, y=-3568) Vertex(vertex_id=163, x=3264, y=-3616)
+   Vertex(vertex_id=170, x=3472, y=-3432) Vertex(vertex_id=171, x=3408, y=-3432)
+   Vertex(vertex_id=171, x=3408, y=-3432) Vertex(vertex_id=172, x=3312, y=-3496)
+   Vertex(vertex_id=172, x=3312, y=-3496) Vertex(vertex_id=169, x=3352, y=-3568)
+   Vertex(vertex_id=129, x=2240, y=-3776) Vertex(vertex_id=173, x=2208, y=-3680)
+   Vertex(vertex_id=173, x=2208, y=-3680) Vertex(vertex_id=174, x=2176, y=-3680)
+   Vertex(vertex_id=175, x=2016, y=-3680) Vertex(vertex_id=130, x=1984, y=-3776)
+   Vertex(vertex_id=176, x=2048, y=-3680) Vertex(vertex_id=175, x=2016, y=-3680)
+   Vertex(vertex_id=177, x=2176, y=-3776) Vertex(vertex_id=178, x=2176, y=-3808)
+   Vertex(vertex_id=178, x=2176, y=-3808) Vertex(vertex_id=179, x=2176, y=-3840)
+   Vertex(vertex_id=180, x=2048, y=-3808) Vertex(vertex_id=181, x=2048, y=-3776)
+   Vertex(vertex_id=182, x=2048, y=-3840) Vertex(vertex_id=180, x=2048, y=-3808)
+   Vertex(vertex_id=183, x=2048, y=-3872) Vertex(vertex_id=182, x=2048, y=-3840)
+   Vertex(vertex_id=184, x=2048, y=-3904) Vertex(vertex_id=183, x=2048, y=-3872)
+   Vertex(vertex_id=179, x=2176, y=-3840) Vertex(vertex_id=185, x=2176, y=-3872)
+   Vertex(vertex_id=185, x=2176, y=-3872) Vertex(vertex_id=186, x=2176, y=-3904)
+   Vertex(vertex_id=187, x=2240, y=-4096) Vertex(vertex_id=188, x=2112, y=-4032)
+   Vertex(vertex_id=174, x=2176, y=-3680) Vertex(vertex_id=176, x=2048, y=-3680)
+   Vertex(vertex_id=181, x=2048, y=-3776) Vertex(vertex_id=177, x=2176, y=-3776)
+   Vertex(vertex_id=180, x=2048, y=-3808) Vertex(vertex_id=178, x=2176, y=-3808)
+   Vertex(vertex_id=182, x=2048, y=-3840) Vertex(vertex_id=179, x=2176, y=-3840)
+   Vertex(vertex_id=183, x=2048, y=-3872) Vertex(vertex_id=185, x=2176, y=-3872)
+   Vertex(vertex_id=184, x=2048, y=-3904) Vertex(vertex_id=186, x=2176, y=-3904)
+   Vertex(vertex_id=187, x=2240, y=-4096) Vertex(vertex_id=189, x=2240, y=-3968)
+   Vertex(vertex_id=190, x=2368, y=-3968) Vertex(vertex_id=191, x=2368, y=-4096)
+   Vertex(vertex_id=192, x=2880, y=-3776) Vertex(vertex_id=193, x=2880, y=-3904)
+   Vertex(vertex_id=194, x=2848, y=-3776) Vertex(vertex_id=195, x=2848, y=-3904)
+   Vertex(vertex_id=196, x=2816, y=-3776) Vertex(vertex_id=197, x=2816, y=-3904)
+   Vertex(vertex_id=198, x=2784, y=-3776) Vertex(vertex_id=199, x=2784, y=-3904)
+   Vertex(vertex_id=200, x=2752, y=-3776) Vertex(vertex_id=201, x=2752, y=-3904)
+   Vertex(vertex_id=202, x=2688, y=-3776) Vertex(vertex_id=203, x=2720, y=-3904)
+   Vertex(vertex_id=204, x=2632, y=-3792) Vertex(vertex_id=205, x=2688, y=-3920)
+   Vertex(vertex_id=204, x=2632, y=-3792) Vertex(vertex_id=202, x=2688, y=-3776)
+   Vertex(vertex_id=203, x=2720, y=-3904) Vertex(vertex_id=205, x=2688, y=-3920)
+   Vertex(vertex_id=202, x=2688, y=-3776) Vertex(vertex_id=200, x=2752, y=-3776)
+   Vertex(vertex_id=200, x=2752, y=-3776) Vertex(vertex_id=198, x=2784, y=-3776)
+   Vertex(vertex_id=198, x=2784, y=-3776) Vertex(vertex_id=196, x=2816, y=-3776)
+   Vertex(vertex_id=196, x=2816, y=-3776) Vertex(vertex_id=194, x=2848, y=-3776)
+   Vertex(vertex_id=194, x=2848, y=-3776) Vertex(vertex_id=192, x=2880, y=-3776)
+   Vertex(vertex_id=193, x=2880, y=-3904) Vertex(vertex_id=195, x=2848, y=-3904)
+   Vertex(vertex_id=195, x=2848, y=-3904) Vertex(vertex_id=197, x=2816, y=-3904)
+   Vertex(vertex_id=197, x=2816, y=-3904) Vertex(vertex_id=199, x=2784, y=-3904)
+   Vertex(vertex_id=199, x=2784, y=-3904) Vertex(vertex_id=201, x=2752, y=-3904)
+   Vertex(vertex_id=201, x=2752, y=-3904) Vertex(vertex_id=203, x=2720, y=-3904)
+   Vertex(vertex_id=192, x=2880, y=-3776) Vertex(vertex_id=206, x=2912, y=-3776)
+   Vertex(vertex_id=207, x=2912, y=-3904) Vertex(vertex_id=193, x=2880, y=-3904)
+   Vertex(vertex_id=208, x=2944, y=-3904) Vertex(vertex_id=207, x=2912, y=-3904)
+   Vertex(vertex_id=206, x=2912, y=-3776) Vertex(vertex_id=167, x=2944, y=-3776)
+   Vertex(vertex_id=208, x=2944, y=-3904) Vertex(vertex_id=167, x=2944, y=-3776)
+   Vertex(vertex_id=206, x=2912, y=-3776) Vertex(vertex_id=207, x=2912, y=-3904)
+   Vertex(vertex_id=209, x=2944, y=-4000) Vertex(vertex_id=208, x=2944, y=-3904)
+   Vertex(vertex_id=127, x=2736, y=-3648) Vertex(vertex_id=210, x=2240, y=-3648)
+   Vertex(vertex_id=210, x=2240, y=-3648) Vertex(vertex_id=211, x=1984, y=-3648)
+   Vertex(vertex_id=211, x=1984, y=-3648) Vertex(vertex_id=35, x=1376, y=-3648)
+   Vertex(vertex_id=211, x=1984, y=-3648) Vertex(vertex_id=130, x=1984, y=-3776)
+   Vertex(vertex_id=129, x=2240, y=-3776) Vertex(vertex_id=210, x=2240, y=-3648)
+   Vertex(vertex_id=205, x=2688, y=-3920) Vertex(vertex_id=212, x=2672, y=-3920)
+   Vertex(vertex_id=212, x=2672, y=-3920) Vertex(vertex_id=191, x=2368, y=-4096)
+   Vertex(vertex_id=190, x=2368, y=-3968) Vertex(vertex_id=213, x=2616, y=-3792)
+   Vertex(vertex_id=213, x=2616, y=-3792) Vertex(vertex_id=204, x=2632, y=-3792)
+   Vertex(vertex_id=186, x=2176, y=-3904) Vertex(vertex_id=214, x=2176, y=-3920)
+   Vertex(vertex_id=214, x=2176, y=-3920) Vertex(vertex_id=189, x=2240, y=-3968)
+   Vertex(vertex_id=188, x=2112, y=-4032) Vertex(vertex_id=215, x=2048, y=-3920)
+   Vertex(vertex_id=215, x=2048, y=-3920) Vertex(vertex_id=184, x=2048, y=-3904)
+   Vertex(vertex_id=150, x=2752, y=-3048) Vertex(vertex_id=162, x=2976, y=-3072)
+   Vertex(vertex_id=147, x=2880, y=-2880) Vertex(vertex_id=216, x=2752, y=-2800)
+   Vertex(vertex_id=216, x=2752, y=-2800) Vertex(vertex_id=141, x=2752, y=-2784)
+   Vertex(vertex_id=145, x=2944, y=-2656) Vertex(vertex_id=217, x=2960, y=-2656)
+   Vertex(vertex_id=217, x=2960, y=-2656) Vertex(vertex_id=148, x=3048, y=-2880)
+   Vertex(vertex_id=218, x=3400, y=-3152) Vertex(vertex_id=170, x=3472, y=-3432)
+   Vertex(vertex_id=170, x=3472, y=-3432) Vertex(vertex_id=219, x=3448, y=-3520)
+   Vertex(vertex_id=219, x=3448, y=-3520) Vertex(vertex_id=169, x=3352, y=-3568)
+   Vertex(vertex_id=132, x=2240, y=-2920) Vertex(vertex_id=220, x=2272, y=-3008)
+   Vertex(vertex_id=220, x=2272, y=-3008) Vertex(vertex_id=221, x=2432, y=-3112)
+   Vertex(vertex_id=221, x=2432, y=-3112) Vertex(vertex_id=222, x=2736, y=-3112)
+   Vertex(vertex_id=222, x=2736, y=-3112) Vertex(vertex_id=223, x=2752, y=-3112)
+   Vertex(vertex_id=153, x=2752, y=-3360) Vertex(vertex_id=223, x=2752, y=-3112)
+   Vertex(vertex_id=222, x=2736, y=-3112) Vertex(vertex_id=154, x=2736, y=-3360)
+   Vertex(vertex_id=223, x=2752, y=-3112) Vertex(vertex_id=150, x=2752, y=-3048)
+   Vertex(vertex_id=224, x=3200, y=-4128) Vertex(vertex_id=225, x=3328, y=-4128)
+   Vertex(vertex_id=226, x=2688, y=-4128) Vertex(vertex_id=227, x=2816, y=-4128)
+   Vertex(vertex_id=227, x=2816, y=-4128) Vertex(vertex_id=228, x=2856, y=-4160)
+   Vertex(vertex_id=229, x=2912, y=-4160) Vertex(vertex_id=230, x=2912, y=-4128)
+   Vertex(vertex_id=231, x=3104, y=-4128) Vertex(vertex_id=232, x=3104, y=-4160)
+   Vertex(vertex_id=233, x=3160, y=-4160) Vertex(vertex_id=224, x=3200, y=-4128)
+   Vertex(vertex_id=234, x=3104, y=-4352) Vertex(vertex_id=235, x=3104, y=-4384)
+   Vertex(vertex_id=235, x=3104, y=-4384) Vertex(vertex_id=236, x=3160, y=-4384)
+   Vertex(vertex_id=236, x=3160, y=-4384) Vertex(vertex_id=237, x=3160, y=-4352)
+   Vertex(vertex_id=238, x=2856, y=-4352) Vertex(vertex_id=239, x=2856, y=-4384)
+   Vertex(vertex_id=239, x=2856, y=-4384) Vertex(vertex_id=240, x=2912, y=-4384)
+   Vertex(vertex_id=240, x=2912, y=-4384) Vertex(vertex_id=241, x=2912, y=-4352)
+   Vertex(vertex_id=228, x=2856, y=-4160) Vertex(vertex_id=242, x=2888, y=-4160)
+   Vertex(vertex_id=242, x=2888, y=-4160) Vertex(vertex_id=229, x=2912, y=-4160)
+   Vertex(vertex_id=237, x=3160, y=-4352) Vertex(vertex_id=243, x=3128, y=-4352)
+   Vertex(vertex_id=243, x=3128, y=-4352) Vertex(vertex_id=234, x=3104, y=-4352)
+   Vertex(vertex_id=232, x=3104, y=-4160) Vertex(vertex_id=244, x=3128, y=-4160)
+   Vertex(vertex_id=244, x=3128, y=-4160) Vertex(vertex_id=233, x=3160, y=-4160)
+   Vertex(vertex_id=241, x=2912, y=-4352) Vertex(vertex_id=245, x=2888, y=-4352)
+   Vertex(vertex_id=245, x=2888, y=-4352) Vertex(vertex_id=238, x=2856, y=-4352)
+   Vertex(vertex_id=245, x=2888, y=-4352) Vertex(vertex_id=246, x=2888, y=-4320)
+   Vertex(vertex_id=246, x=2888, y=-4320) Vertex(vertex_id=247, x=2888, y=-4192)
+   Vertex(vertex_id=247, x=2888, y=-4192) Vertex(vertex_id=242, x=2888, y=-4160)
+   Vertex(vertex_id=248, x=3128, y=-4320) Vertex(vertex_id=243, x=3128, y=-4352)
+   Vertex(vertex_id=244, x=3128, y=-4160) Vertex(vertex_id=249, x=3128, y=-4192)
+   Vertex(vertex_id=249, x=3128, y=-4192) Vertex(vertex_id=248, x=3128, y=-4320)
+   Vertex(vertex_id=250, x=3328, y=-4544) Vertex(vertex_id=251, x=3072, y=-4544)
+   Vertex(vertex_id=252, x=2944, y=-4544) Vertex(vertex_id=253, x=2688, y=-4544)
+   Vertex(vertex_id=251, x=3072, y=-4544) Vertex(vertex_id=254, x=3072, y=-4608)
+   Vertex(vertex_id=255, x=2944, y=-4608) Vertex(vertex_id=252, x=2944, y=-4544)
+   Vertex(vertex_id=229, x=2912, y=-4160) Vertex(vertex_id=232, x=3104, y=-4160)
+   Vertex(vertex_id=234, x=3104, y=-4352) Vertex(vertex_id=241, x=2912, y=-4352)
+   Vertex(vertex_id=166, x=3072, y=-4000) Vertex(vertex_id=209, x=2944, y=-4000)
+   Vertex(vertex_id=253, x=2688, y=-4544) Vertex(vertex_id=226, x=2688, y=-4128)
+   Vertex(vertex_id=225, x=3328, y=-4128) Vertex(vertex_id=250, x=3328, y=-4544)
+   Vertex(vertex_id=238, x=2856, y=-4352) Vertex(vertex_id=228, x=2856, y=-4160)
+   Vertex(vertex_id=233, x=3160, y=-4160) Vertex(vertex_id=237, x=3160, y=-4352)
+   Vertex(vertex_id=252, x=2944, y=-4544) Vertex(vertex_id=251, x=3072, y=-4544)
+   Vertex(vertex_id=254, x=3072, y=-4608) Vertex(vertex_id=256, x=3040, y=-4608)
+   Vertex(vertex_id=257, x=2976, y=-4608) Vertex(vertex_id=255, x=2944, y=-4608)
+   Vertex(vertex_id=258, x=2976, y=-4632) Vertex(vertex_id=257, x=2976, y=-4608)
+   Vertex(vertex_id=256, x=3040, y=-4608) Vertex(vertex_id=259, x=3040, y=-4632)
+   Vertex(vertex_id=259, x=3040, y=-4632) Vertex(vertex_id=260, x=3040, y=-4648)
+   Vertex(vertex_id=260, x=3040, y=-4648) Vertex(vertex_id=261, x=3040, y=-4672)
+   Vertex(vertex_id=262, x=2976, y=-4672) Vertex(vertex_id=263, x=2976, y=-4648)
+   Vertex(vertex_id=263, x=2976, y=-4648) Vertex(vertex_id=258, x=2976, y=-4632)
+   Vertex(vertex_id=263, x=2976, y=-4648) Vertex(vertex_id=260, x=3040, y=-4648)
+   Vertex(vertex_id=259, x=3040, y=-4632) Vertex(vertex_id=258, x=2976, y=-4632)
+   Vertex(vertex_id=261, x=3040, y=-4672) Vertex(vertex_id=264, x=3104, y=-4672)
+   Vertex(vertex_id=265, x=2912, y=-4672) Vertex(vertex_id=262, x=2976, y=-4672)
+   Vertex(vertex_id=264, x=3104, y=-4672) Vertex(vertex_id=266, x=3104, y=-4864)
+   Vertex(vertex_id=267, x=2912, y=-4864) Vertex(vertex_id=268, x=2912, y=-4800)
+   Vertex(vertex_id=268, x=2912, y=-4800) Vertex(vertex_id=269, x=2912, y=-4736)
+   Vertex(vertex_id=269, x=2912, y=-4736) Vertex(vertex_id=265, x=2912, y=-4672)
+   Vertex(vertex_id=266, x=3104, y=-4864) Vertex(vertex_id=267, x=2912, y=-4864)
+   Vertex(vertex_id=262, x=2976, y=-4672) Vertex(vertex_id=261, x=3040, y=-4672)
+   Vertex(vertex_id=270, x=2944, y=-4016) Vertex(vertex_id=209, x=2944, y=-4000)
+   Vertex(vertex_id=166, x=3072, y=-4000) Vertex(vertex_id=271, x=3072, y=-4016)
+   Vertex(vertex_id=230, x=2912, y=-4128) Vertex(vertex_id=272, x=2944, y=-4032)
+   Vertex(vertex_id=272, x=2944, y=-4032) Vertex(vertex_id=270, x=2944, y=-4016)
+   Vertex(vertex_id=271, x=3072, y=-4016) Vertex(vertex_id=273, x=3072, y=-4032)
+   Vertex(vertex_id=273, x=3072, y=-4032) Vertex(vertex_id=231, x=3104, y=-4128)
+   Vertex(vertex_id=271, x=3072, y=-4016) Vertex(vertex_id=270, x=2944, y=-4016)
+   Vertex(vertex_id=272, x=2944, y=-4032) Vertex(vertex_id=273, x=3072, y=-4032)
+   Vertex(vertex_id=274, x=3024, y=-4592) Vertex(vertex_id=275, x=2992, y=-4592)
+   Vertex(vertex_id=276, x=2992, y=-4600) Vertex(vertex_id=277, x=3024, y=-4600)
+   Vertex(vertex_id=277, x=3024, y=-4600) Vertex(vertex_id=274, x=3024, y=-4592)
+   Vertex(vertex_id=275, x=2992, y=-4592) Vertex(vertex_id=276, x=2992, y=-4600)
+   Vertex(vertex_id=256, x=3040, y=-4608) Vertex(vertex_id=257, x=2976, y=-4608)
+   Vertex(vertex_id=278, x=3024, y=-4840) Vertex(vertex_id=279, x=2992, y=-4840)
+   Vertex(vertex_id=280, x=2992, y=-4848) Vertex(vertex_id=281, x=3024, y=-4848)
+   Vertex(vertex_id=281, x=3024, y=-4848) Vertex(vertex_id=278, x=3024, y=-4840)
+   Vertex(vertex_id=279, x=2992, y=-4840) Vertex(vertex_id=280, x=2992, y=-4848)
+   Vertex(vertex_id=151, x=2752, y=-2912) Vertex(vertex_id=146, x=2880, y=-2912)
+   Vertex(vertex_id=282, x=-240, y=-3264) Vertex(vertex_id=283, x=-208, y=-3264)
+   Vertex(vertex_id=283, x=-208, y=-3264) Vertex(vertex_id=284, x=-192, y=-3248)
+   Vertex(vertex_id=284, x=-192, y=-3248) Vertex(vertex_id=285, x=-192, y=-3216)
+   Vertex(vertex_id=285, x=-192, y=-3216) Vertex(vertex_id=286, x=-208, y=-3200)
+   Vertex(vertex_id=286, x=-208, y=-3200) Vertex(vertex_id=287, x=-240, y=-3200)
+   Vertex(vertex_id=287, x=-240, y=-3200) Vertex(vertex_id=288, x=-256, y=-3216)
+   Vertex(vertex_id=288, x=-256, y=-3216) Vertex(vertex_id=289, x=-256, y=-3248)
+   Vertex(vertex_id=289, x=-256, y=-3248) Vertex(vertex_id=282, x=-240, y=-3264)
+   Vertex(vertex_id=290, x=1664, y=-2368) Vertex(vertex_id=291, x=1600, y=-2368)
+   Vertex(vertex_id=291, x=1600, y=-2368) Vertex(vertex_id=292, x=1600, y=-2112)
+   Vertex(vertex_id=293, x=1600, y=-2624) Vertex(vertex_id=294, x=1664, y=-2624)
+   Vertex(vertex_id=295, x=2560, y=-2112) Vertex(vertex_id=296, x=2560, y=-2496)
+   Vertex(vertex_id=296, x=2560, y=-2496) Vertex(vertex_id=297, x=2496, y=-2496)
+   Vertex(vertex_id=298, x=2176, y=-2752) Vertex(vertex_id=299, x=2176, y=-2816)
+   Vertex(vertex_id=300, x=1600, y=-2048) Vertex(vertex_id=301, x=1664, y=-2048)
+   Vertex(vertex_id=301, x=1664, y=-2048) Vertex(vertex_id=302, x=2496, y=-2048)
+   Vertex(vertex_id=302, x=2496, y=-2048) Vertex(vertex_id=303, x=2560, y=-2048)
+   Vertex(vertex_id=303, x=2560, y=-2048) Vertex(vertex_id=295, x=2560, y=-2112)
+   Vertex(vertex_id=292, x=1600, y=-2112) Vertex(vertex_id=300, x=1600, y=-2048)
+   Vertex(vertex_id=290, x=1664, y=-2368) Vertex(vertex_id=304, x=1664, y=-2112)
+   Vertex(vertex_id=304, x=1664, y=-2112) Vertex(vertex_id=305, x=2496, y=-2112)
+   Vertex(vertex_id=305, x=2496, y=-2112) Vertex(vertex_id=297, x=2496, y=-2496)
+   Vertex(vertex_id=299, x=2176, y=-2816) Vertex(vertex_id=306, x=1664, y=-2816)
+   Vertex(vertex_id=306, x=1664, y=-2816) Vertex(vertex_id=307, x=1600, y=-2816)
+   Vertex(vertex_id=307, x=1600, y=-2816) Vertex(vertex_id=308, x=1600, y=-2752)
+   Vertex(vertex_id=308, x=1600, y=-2752) Vertex(vertex_id=293, x=1600, y=-2624)
+   Vertex(vertex_id=298, x=2176, y=-2752) Vertex(vertex_id=309, x=1664, y=-2752)
+   Vertex(vertex_id=309, x=1664, y=-2752) Vertex(vertex_id=294, x=1664, y=-2624)
+   Vertex(vertex_id=310, x=2496, y=-2688) Vertex(vertex_id=311, x=2496, y=-2752)
+   Vertex(vertex_id=142, x=2624, y=-2784) Vertex(vertex_id=312, x=2520, y=-2688)
+   Vertex(vertex_id=313, x=2496, y=-2560) Vertex(vertex_id=143, x=2520, y=-2560)
+   Vertex(vertex_id=312, x=2520, y=-2688) Vertex(vertex_id=310, x=2496, y=-2688)
+   Vertex(vertex_id=125, x=1664, y=-2560) Vertex(vertex_id=126, x=1664, y=-2432)
+   Vertex(vertex_id=313, x=2496, y=-2560) Vertex(vertex_id=310, x=2496, y=-2688)
+   Vertex(vertex_id=314, x=1984, y=-2304) Vertex(vertex_id=315, x=1984, y=-2240)
+   Vertex(vertex_id=315, x=1984, y=-2240) Vertex(vertex_id=316, x=1792, y=-2240)
+   Vertex(vertex_id=316, x=1792, y=-2240) Vertex(vertex_id=317, x=1792, y=-2304)
+   Vertex(vertex_id=317, x=1792, y=-2304) Vertex(vertex_id=314, x=1984, y=-2304)
+   Vertex(vertex_id=294, x=1664, y=-2624) Vertex(vertex_id=318, x=1664, y=-2600)
+   Vertex(vertex_id=318, x=1664, y=-2600) Vertex(vertex_id=125, x=1664, y=-2560)
+   Vertex(vertex_id=126, x=1664, y=-2432) Vertex(vertex_id=319, x=1664, y=-2392)
+   Vertex(vertex_id=319, x=1664, y=-2392) Vertex(vertex_id=290, x=1664, y=-2368)
+   Vertex(vertex_id=297, x=2496, y=-2496) Vertex(vertex_id=320, x=2496, y=-2520)
+   Vertex(vertex_id=320, x=2496, y=-2520) Vertex(vertex_id=313, x=2496, y=-2560)
+   Vertex(vertex_id=311, x=2496, y=-2752) Vertex(vertex_id=321, x=2200, y=-2752)
+   Vertex(vertex_id=321, x=2200, y=-2752) Vertex(vertex_id=298, x=2176, y=-2752)
+   Vertex(vertex_id=322, x=2112, y=-2592) Vertex(vertex_id=323, x=2336, y=-2592)
+   Vertex(vertex_id=323, x=2336, y=-2592) Vertex(vertex_id=324, x=2336, y=-2272)
+   Vertex(vertex_id=324, x=2336, y=-2272) Vertex(vertex_id=325, x=2112, y=-2272)
+   Vertex(vertex_id=325, x=2112, y=-2272) Vertex(vertex_id=326, x=2112, y=-2304)
+   Vertex(vertex_id=326, x=2112, y=-2304) Vertex(vertex_id=327, x=2144, y=-2304)
+   Vertex(vertex_id=327, x=2144, y=-2304) Vertex(vertex_id=328, x=2176, y=-2304)
+   Vertex(vertex_id=328, x=2176, y=-2304) Vertex(vertex_id=329, x=2208, y=-2304)
+   Vertex(vertex_id=329, x=2208, y=-2304) Vertex(vertex_id=330, x=2304, y=-2304)
+   Vertex(vertex_id=330, x=2304, y=-2304) Vertex(vertex_id=331, x=2304, y=-2560)
+   Vertex(vertex_id=331, x=2304, y=-2560) Vertex(vertex_id=332, x=2208, y=-2560)
+   Vertex(vertex_id=332, x=2208, y=-2560) Vertex(vertex_id=333, x=2176, y=-2560)
+   Vertex(vertex_id=333, x=2176, y=-2560) Vertex(vertex_id=334, x=2144, y=-2560)
+   Vertex(vertex_id=334, x=2144, y=-2560) Vertex(vertex_id=335, x=2112, y=-2560)
+   Vertex(vertex_id=335, x=2112, y=-2560) Vertex(vertex_id=322, x=2112, y=-2592)
+   Vertex(vertex_id=327, x=2144, y=-2304) Vertex(vertex_id=334, x=2144, y=-2560)
+   Vertex(vertex_id=328, x=2176, y=-2304) Vertex(vertex_id=333, x=2176, y=-2560)
+   Vertex(vertex_id=329, x=2208, y=-2304) Vertex(vertex_id=332, x=2208, y=-2560)
+   Vertex(vertex_id=336, x=1984, y=-2624) Vertex(vertex_id=337, x=1984, y=-2560)
+   Vertex(vertex_id=337, x=1984, y=-2560) Vertex(vertex_id=338, x=1792, y=-2560)
+   Vertex(vertex_id=338, x=1792, y=-2560) Vertex(vertex_id=339, x=1792, y=-2624)
+   Vertex(vertex_id=339, x=1792, y=-2624) Vertex(vertex_id=336, x=1984, y=-2624)
+   Vertex(vertex_id=340, x=1992, y=-2552) Vertex(vertex_id=341, x=1784, y=-2552)
+   Vertex(vertex_id=341, x=1784, y=-2552) Vertex(vertex_id=342, x=1784, y=-2632)
+   Vertex(vertex_id=342, x=1784, y=-2632) Vertex(vertex_id=343, x=1992, y=-2632)
+   Vertex(vertex_id=343, x=1992, y=-2632) Vertex(vertex_id=340, x=1992, y=-2552)
+   Vertex(vertex_id=344, x=1784, y=-2312) Vertex(vertex_id=345, x=1992, y=-2312)
+   Vertex(vertex_id=345, x=1992, y=-2312) Vertex(vertex_id=346, x=1992, y=-2232)
+   Vertex(vertex_id=346, x=1992, y=-2232) Vertex(vertex_id=347, x=1784, y=-2232)
+   Vertex(vertex_id=347, x=1784, y=-2232) Vertex(vertex_id=344, x=1784, y=-2312)
+   Vertex(vertex_id=142, x=2624, y=-2784) Vertex(vertex_id=144, x=2752, y=-2560)
+   Vertex(vertex_id=348, x=3520, y=-3904) Vertex(vertex_id=349, x=3328, y=-3968)
+   Vertex(vertex_id=350, x=3200, y=-3968) Vertex(vertex_id=351, x=3200, y=-3744)
+   Vertex(vertex_id=352, x=3328, y=-3744) Vertex(vertex_id=353, x=3360, y=-3648)
+   Vertex(vertex_id=349, x=3328, y=-3968) Vertex(vertex_id=352, x=3328, y=-3744)
+   Vertex(vertex_id=219, x=3448, y=-3520) Vertex(vertex_id=354, x=3472, y=-3520)
+   Vertex(vertex_id=354, x=3472, y=-3520) Vertex(vertex_id=355, x=3520, y=-3584)
+   Vertex(vertex_id=353, x=3360, y=-3648) Vertex(vertex_id=356, x=3352, y=-3592)
+   Vertex(vertex_id=356, x=3352, y=-3592) Vertex(vertex_id=169, x=3352, y=-3568)
+   Vertex(vertex_id=349, x=3328, y=-3968) Vertex(vertex_id=357, x=3304, y=-3968)
+   Vertex(vertex_id=357, x=3304, y=-3968) Vertex(vertex_id=350, x=3200, y=-3968)
+   Vertex(vertex_id=351, x=3200, y=-3744) Vertex(vertex_id=358, x=3304, y=-3744)
+   Vertex(vertex_id=358, x=3304, y=-3744) Vertex(vertex_id=352, x=3328, y=-3744)
+   Vertex(vertex_id=191, x=2368, y=-4096) Vertex(vertex_id=359, x=2344, y=-4096)
+   Vertex(vertex_id=359, x=2344, y=-4096) Vertex(vertex_id=360, x=2264, y=-4096)
+   Vertex(vertex_id=360, x=2264, y=-4096) Vertex(vertex_id=187, x=2240, y=-4096)
+   Vertex(vertex_id=189, x=2240, y=-3968) Vertex(vertex_id=361, x=2264, y=-3968)
+   Vertex(vertex_id=361, x=2264, y=-3968) Vertex(vertex_id=362, x=2344, y=-3968)
+   Vertex(vertex_id=362, x=2344, y=-3968) Vertex(vertex_id=190, x=2368, y=-3968)
+   Vertex(vertex_id=174, x=2176, y=-3680) Vertex(vertex_id=363, x=2176, y=-3704)
+   Vertex(vertex_id=363, x=2176, y=-3704) Vertex(vertex_id=177, x=2176, y=-3776)
+   Vertex(vertex_id=181, x=2048, y=-3776) Vertex(vertex_id=364, x=2048, y=-3704)
+   Vertex(vertex_id=364, x=2048, y=-3704) Vertex(vertex_id=176, x=2048, y=-3680)
+   Vertex(vertex_id=355, x=3520, y=-3584) Vertex(vertex_id=365, x=3520, y=-3840)
+   Vertex(vertex_id=366, x=3680, y=-3904) Vertex(vertex_id=367, x=3584, y=-3904)
+   Vertex(vertex_id=368, x=3744, y=-3808) Vertex(vertex_id=366, x=3680, y=-3904)
+   Vertex(vertex_id=369, x=3584, y=-3840) Vertex(vertex_id=370, x=3616, y=-3776)
+   Vertex(vertex_id=370, x=3616, y=-3776) Vertex(vertex_id=371, x=3552, y=-3552)
+   Vertex(vertex_id=371, x=3552, y=-3552) Vertex(vertex_id=372, x=3552, y=-3392)
+   Vertex(vertex_id=372, x=3552, y=-3392) Vertex(vertex_id=373, x=3648, y=-3264)
+   Vertex(vertex_id=374, x=3680, y=-3552) Vertex(vertex_id=368, x=3744, y=-3808)
+   Vertex(vertex_id=375, x=3680, y=-3392) Vertex(vertex_id=374, x=3680, y=-3552)
+   Vertex(vertex_id=376, x=3808, y=-3264) Vertex(vertex_id=375, x=3680, y=-3392)
+   Vertex(vertex_id=373, x=3648, y=-3264) Vertex(vertex_id=377, x=3496, y=-3032)
+   Vertex(vertex_id=378, x=3584, y=-2880) Vertex(vertex_id=376, x=3808, y=-3264)
+   Vertex(vertex_id=377, x=3496, y=-3032) Vertex(vertex_id=379, x=3456, y=-3032)
+   Vertex(vertex_id=380, x=3360, y=-2880) Vertex(vertex_id=378, x=3584, y=-2880)
+   Vertex(vertex_id=155, x=3304, y=-3040) Vertex(vertex_id=218, x=3400, y=-3152)
+   Vertex(vertex_id=365, x=3520, y=-3840) Vertex(vertex_id=348, x=3520, y=-3904)
+   Vertex(vertex_id=369, x=3584, y=-3840) Vertex(vertex_id=367, x=3584, y=-3904)
+   Vertex(vertex_id=155, x=3304, y=-3040) Vertex(vertex_id=381, x=3320, y=-3040)
+   Vertex(vertex_id=381, x=3320, y=-3040) Vertex(vertex_id=380, x=3360, y=-2880)
+   Vertex(vertex_id=379, x=3456, y=-3032) Vertex(vertex_id=382, x=3416, y=-3152)
+   Vertex(vertex_id=382, x=3416, y=-3152) Vertex(vertex_id=218, x=3400, y=-3152)
+   Vertex(vertex_id=365, x=3520, y=-3840) Vertex(vertex_id=383, x=3536, y=-3840)
+   Vertex(vertex_id=383, x=3536, y=-3840) Vertex(vertex_id=369, x=3584, y=-3840)
+   Vertex(vertex_id=367, x=3584, y=-3904) Vertex(vertex_id=384, x=3536, y=-3904)
+   Vertex(vertex_id=384, x=3536, y=-3904) Vertex(vertex_id=348, x=3520, y=-3904)
+#+end_example
+
+   #+BEGIN_SRC python :python python3 :tangle ./utils/__init__.py
+     #
+     # Utility functions
+     #
+     def read_file(file_obj, size, position):
+         if position:
+             file_obj.seek(position)
+         data = file_obj.read(size)
+         return data
+
+     def read_file_1(file_obj, size, position):
+         if position:
+             file_obj.seek(position)
+         yield from split_file(file_obj, 1)
+
+     def split_file(file_obj, size):
+         while True:
+             data = file_obj.read(size)
+             if not data:
+                 break
+             yield data
+
+
+   #+END_SRC
+
+#+NAME: dependencies
+#+BEGIN_SRC python
+  from contextlib import contextmanager
+  import logging
+  import collections
+  import functools
+  import struct
+  from utils import read_file, split_file
+
+
+#+END_SRC
+First get the header to know where to get the index..
+   #+BEGIN_SRC python :python python3 :tangle header.py :results output :noweb yes
+     <<dependencies>>
+     logging.basicConfig(level=logging.DEBUG)
+     logger = logging.getLogger(__name__)
+
+     Header = collections.namedtuple("Header", ['identification',
+                                                'num_lumps',
+                                                'info_table_offset'])
+     def get_header(byte_data: bytes) -> Header:
+        return Header._make(struct.unpack("<4sII", byte_data)) # 4 chars, 2 unsigned ints!
+
+
+     def read_header(filename='doom1.wad'):
+         position, header_bytes = 0, 12
+         with open(filename, 'rb') as wadfile:
+             header_data = get_header(read_file(wadfile,
+                                                header_bytes,
+                                                position))
+             return header_data
+
+
+     if __name__ == "__main__":
+         print(read_header())
+
+   #+END_SRC
+
+   #+RESULTS:
+   : Header(identification=b'IWAD', num_lumps=1264, info_table_offset=4175796)
+
+
+
+Then check the index itself
+#+BEGIN_SRC python :python python3 :tangle index.py :results output :noweb yes
+  <<dependencies>>
+  #
+  # get the file index info
+  #
+  IndexEntry = collections.namedtuple("IndexEntry", "position size name")
+  def get_index_entry(byte_data: bytes) -> IndexEntry:
+      return IndexEntry._make(struct.unpack('<II8s', byte_data))
+
+  def get_file_index_info(header_data):
+      with open("doom1.wad", 'rb') as wadfile:
+          wadfile.seek(header_data.info_table_offset)
+          file_chunks = split_file(wadfile, 16)
+          enumerated_file_parts = enumerate(file_chunks)
+          yield from ((position, get_index_entry(file_chunk)) for position, file_chunk in enumerated_file_parts)
+
+  # Offsets
+  from enum import IntEnum, Enum
+  Offsets = Enum("Offsets", "things linedefs sidedefs vertexes segs ssectors nodes sectors reject blockmap")
+  assert(Offsets.linedefs.value == 2)  #  E1M1 + linedef == 6 + 2 == 8
+  assert(Offsets.vertexes.value == 4)  #  E1M1 + vertexes == 6 + 4 == 10
+
+  def read_index_from(header_data, start_position=0): 
+      file_indexes = ((position, file_index_entry) for position, file_index_entry in  get_file_index_info(header_data))
+      yield from ((position, file_index_entry) for position, file_index_entry in file_indexes if position >= start_position)
+
+  def get_one_level():
+      """
+      Only get's E1M1 from the doom1.wad file
+      """
+      from header import read_header  # Don't like this.
+
+      # First map starts at six, I cheated and read the first few lumps:
+      header_data = read_header()
+      E1M1 = 6
+      start_position = E1M1
+      end_position = E1M1 + len(Offsets)
+      for position, info in read_index_from(header_data, E1M1):
+          yield (position, info)
+          if position == end_position:
+              break
+          #print(position, info)
+
+  def _get_all_indexes__testing():
+      from header import read_header  # Don't like this.
+
+      # First map starts at six, I cheated and read the first few lumps:
+      header_data = read_header()
+      for position, info in read_index_from(header_data, 0):
+          yield (position, info)
+  
+
+  if __name__ == "__main__":
+      from header import read_header  # Don't like this.
+
+      header_data = read_header()
+      # for position, info in get_file_index_info(header_data):
+      #     print(position, info)
+      #     if position > 20:
+      #         break
+      for position, info in get_file_index_info(header_data):
+          print(position, info)
+          if position > 20:
+              break
+      #for i , info in get_one_level():
+      #    print(i, info)
+
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+0 IndexEntry(position=12, size=10752, name=b'PLAYPAL\x00')
+1 IndexEntry(position=10764, size=8704, name=b'COLORMAP')
+2 IndexEntry(position=19468, size=4000, name=b'ENDOOM\x00\x00')
+3 IndexEntry(position=23468, size=20118, name=b'DEMO1\x00\x00\x00')
+4 IndexEntry(position=43588, size=15358, name=b'DEMO2\x00\x00\x00')
+5 IndexEntry(position=58948, size=8550, name=b'DEMO3\x00\x00\x00')
+6 IndexEntry(position=67500, size=0, name=b'E1M1\x00\x00\x00\x00')
+7 IndexEntry(position=67500, size=1380, name=b'THINGS\x00\x00')
+8 IndexEntry(position=68880, size=6650, name=b'LINEDEFS')
+9 IndexEntry(position=75532, size=19440, name=b'SIDEDEFS')
+10 IndexEntry(position=94972, size=1868, name=b'VERTEXES')
+11 IndexEntry(position=96840, size=8784, name=b'SEGS\x00\x00\x00\x00')
+12 IndexEntry(position=105624, size=948, name=b'SSECTORS')
+13 IndexEntry(position=106572, size=6608, name=b'NODES\x00\x00\x00')
+14 IndexEntry(position=113180, size=2210, name=b'SECTORS\x00')
+15 IndexEntry(position=115392, size=904, name=b'REJECT\x00\x00')
+16 IndexEntry(position=116296, size=6922, name=b'BLOCKMAP')
+17 IndexEntry(position=123220, size=0, name=b'E1M2\x00\x00\x00\x00')
+18 IndexEntry(position=123220, size=2620, name=b'THINGS\x00\x00')
+19 IndexEntry(position=125840, size=14462, name=b'LINEDEFS')
+20 IndexEntry(position=140304, size=39690, name=b'SIDEDEFS')
+21 IndexEntry(position=179996, size=3768, name=b'VERTEXES')
+#+end_example
+
+Now we read the indexes to get the actual data lumps (world information)
+#+BEGIN_SRC python :python python3 :tangle lump.py :results output :noweb yes
+  <<dependencies>>
+  from index import get_one_level, IndexEntry
+  import contextlib
+
+  def read_region_data(filename: str, index_entry: IndexEntry) -> bytes:
+      """
+      Provides data references by the original index metadata.
+
+      Could be lazier
+      """
+      with open(filename, 'rb') as wad_file:
+          return read_file(wad_file, index_entry.size, index_entry.position)
+
+
+  # Now let's save the index data
+  import sqlite3
+
+  def create_schema_lumpinfo(conn):
+      create_schema = """
+      CREATE TABLE IF NOT EXISTS LumpInfo(
+         lump_id INTEGER,
+         position INTEGER,
+         size INTEGER,
+         name VARCHAR,
+         lumpdata BLOB
+      );
+      """
+      delete_schema = """
+      DROP TABLE IF EXISTS LumpInfo;
+      """
+      conn.execute(delete_schema)
+      conn.execute(create_schema)
+
+  def insert_lump(conn, **data):
+      insert_query = """
+      INSERT INTO LumpInfo (lump_id, position, size, name, lumpdata)
+      VALUES (:lump_id, :position, :size, :name, :lumpdata)
+      """
+      conn.execute(insert_query, data)
+
+  def _build_lump_database(conn):
+      create_schema_lumpinfo(conn)
+      for position_index, index_data in get_one_level():
+          lumpdata = read_region_data("doom1.wad", index_data)
+          lumpdata = sqlite3.Binary(lumpdata) if lumpdata else None
+          insert_lump(conn,
+                      lump_id=position_index,
+                      position=index_data.position,
+                      size=index_data.size,
+                      name=index_data.name,
+                      lumpdata=lumpdata)
+
+  def _build_all_lumps_db__testing(conn):
+      from index import _get_all_indexes__testing
+      create_schema_lumpinfo(conn)
+      for position_index, index_data in _get_all_indexes__testing():
+          lumpdata = read_region_data("doom1.wad", index_data)
+          lumpdata = sqlite3.Binary(lumpdata) if lumpdata else None
+          insert_lump(conn,
+                      lump_id=position_index,
+                      position=index_data.position,
+                      size=index_data.size,
+                      name=index_data.name,
+                      lumpdata=lumpdata)
+
+  def build_all_lumps_db__testing():
+     with sqlite3.connect("alllumps.db") as conn:
+         _build_all_lumps_db__testing(conn)
+                    
+  def _retrieve_vertexes(conn):
+      cursor = conn.execute("""
+      SELECT 
+            lump_id,
+            name,
+            position,
+            size,
+            lumpdata
+      FROM Lumpinfo 
+      WHERE name LIKE "VERTEX%"
+      ORDER BY lump_id ASC;
+      """)
+      return cursor.fetchone()
+
+  def _retrieve_lines(conn):
+      cursor = conn.execute("""
+      SELECT 
+            lump_id,
+            name,
+            position,
+            size,
+            lumpdata
+      FROM Lumpinfo 
+      WHERE name LIKE "LINEDEF%"
+      ORDER BY lump_id ASC;
+      """)
+      return cursor.fetchone()
+
+  def _retrieve_segments(conn):
+      cursor = conn.execute("""
+      SELECT 
+            lump_id,
+            name,
+            position,
+            size,
+            lumpdata
+      FROM Lumpinfo 
+      WHERE name LIKE "SEG%"
+      ORDER BY lump_id ASC;
+      """)
+      return cursor.fetchone()
+
+  LumpInfo = collections.namedtuple("LumpInfo", "lump_id name position size lumpdata")
+  # def get_lump_data(byte_data: bytes) -> LumpInfo:
+  #     return IndexEntry._make(struct.unpack('<II8s', byte_data))
+
+  @contextlib.contextmanager
+  def _make_dict_cursor(filename):
+
+      def _dict_factory(cursor, row):
+          d = {}
+          for idx,col in enumerate(cursor.description):
+              d[col[0]] = row[idx]
+          return d
+
+      with sqlite3.connect(filename) as conn:
+          conn.row_factory = _dict_factory
+          yield conn
+    
+  @contextlib.contextmanager
+  def _make_limpinfo_cursor(filename):
+
+      def _lump_factory(cursor, row):
+          d = {}
+          for idx,col in enumerate(cursor.description):
+              d[col[0]] = row[idx]
+          return LumpInfo(**d)
+
+      with sqlite3.connect(filename) as conn:
+          conn.row_factory = _lump_factory
+          yield conn
+
+  make_custom_cursor = _make_limpinfo_cursor
+
+  def build_lump_database():
+      with make_custom_cursor("waddata.db") as conn:
+          _build_lump_database(conn)
+
+  def build_lump_database():
+      with make_custom_cursor("waddata.db") as conn:
+          _build_lump_database(conn)
+
+  def retrieve_lines():
+      with make_custom_cursor("waddata.db") as conn:
+          return _retrieve_lines(conn)
+
+  def retrieve_vertexes():
+      with make_custom_cursor("waddata.db") as conn:
+          return _retrieve_vertexes(conn)
+
+  def retrieve_segments():
+      with make_custom_cursor("waddata.db") as conn:
+          return _retrieve_segments(conn)
+
+  if __name__ == "__main__":
+
+      build_lump_database()
+
+      vertex_data = retrieve_vertexes()
+      #vertex_data.pop('lumpdata')
+      print(vertex_data)
+
+      line_data = retrieve_lines()
+      #line_data.pop('lumpdata')
+      print(line_data)
+
+#+END_SRC
+
+#+RESULTS:
+: LumpInfo(lump_id=10, name=b'VERTEXES', position=94972, size=1868, lumpdata=b'@\x04\xa0\xf1\x00\x04\xa0\xf1\x00\x04\xc0\xf1@\x04\xc0\xf1\x80\x04\xc0\xf1\xc0\x03\xc0\xf1\x00\x05 \xf2@\x03 \xf2@\x05 \xf2\xc0\x02 \xf2\x80\x03\xc0\xf2\xa0\x03\xc0\xf2\xa0\x03\xe0\xf2\x80\x03\xe0\xf2\xa0\x04\xc0\xf2\xc0\x04\xc0\xf2\xc0\x04\xe0\xf2\xa0\x04\xe0\xf2\x80\x03\x00\xf4\x80\x03\xe0\xf3\xa0\x03\xe0\xf3\xa0\x03\x00\xf4\xc0\x04\x00\xf4\xa0\x04\x00\xf4\xa0\x04\xe0\xf3\xc0\x04\xe0\xf3@\x05\xe0\xf2@\x05@\xf3@\x05\x80\xf3@\x05\xc0\xf4@\x05\xe0\xf3`\x05\x80\xf3`\x05\xe0\xf3`\x05\xe0\xf2`\x05@\xf3`\x05\xc0\xf1`\x05\x80\xf4\xc0\x02\x80\xf4@\x03\x80\xf4\xc8\x03\xc0\xf4\xc0\x04\xc0\xf4\xc0\x05\xc0\xf4@\x07\xc0\xf4\xf8\x05\xa0\xf1\x88\x06`\xf1\xc0\x02\xe0\xf2\xc0\x02\xe0\xf3\x00\x02\x00\xf3\x00\x02\x18\xf3\x00\x02\xa8\xf3\x00\x02\xc0\xf3\xa8\x02\xe0\xf3\xa8\x02\xe0\xf2\xf0\x01\xa8\xf3\xf0\x01\x18\xf3\xf0\x01\x00\xf3\xc0\x01\x80\xf2\x80\x00\x80\xf2\x80\x00@\xf4\xc0\x01@\xf4\xf0\x01\xc0\xf3\x80\x00@\xf3\xa0\x00@\xf3\xc0\x00@\xf3\xe0\x00@\xf3\x00\x01@\xf3 \x01@\xf3@\x01@\xf3@\x01\x80\xf3 \x01\x80\xf3\x00\x01\x80\xf3\xe0\x00\x80\xf3\xc0\x00\x80\xf3\xa0\x00\x80\xf3\x80\x00\x80\xf3@\x00\x00\xf4@\x00\xc0\xf20\x00\xc0\xf2\xc0\xff\x00\xf3\xc0\xff\xc0\xf30\x00\x00\xf4\x00\xff\x00\xf3\xc0\xfe \xf3\xc0\xfe\xa0\xf3\x00\xff\xc0\xf3\x80\xff\xd0\xf3\x80\xff\xc0\xf3\x00\xff\xd0\xf3\x00\xff\xf0\xf2\x80\xff\x00\xf3\x80\xff\xf0\xf2\xb0\xfe \xf3\xb0\xfe\xa0\xf3\xb0\xfe\xd0\xf3\xb0\xfe\xf0\xf2\xa0\xff\xf0\xf2@\x00@\xf2\xa0\xff\xd0\xf3@\x00\x80\xf4@\x00\x00\xf5@\x00\xc0\xf1\x80\xfd\xc0\xf1\x00\xfd@\xf2\x00\xfd\x80\xf4\x80\xfd\x00\xf5\x80\xfd@\xf2\x80\xfd\x80\xf4\xa8\xff\xc0\xf3\xa8\xff\x00\xf3\x00\x01\xc0\xf3@\x01\xc0\xf3@\x01\x00\xf4\x00\x01\x00\xf4\x00\x01\xc0\xf2@\x01\xc0\xf2@\x01\x00\xf3\x00\x01\x00\xf3\xe0\x04 \xf6h\x05\xe0\xf5\xc0\x05\x00\xf6\xc0\x05\x80\xf6\x00\x06\x80\xf6\x00\x06\x00\xf6\x10\x06\x00\xf6\x10\x06\x80\xf6\x80\x06\x00\xf6\x80\x06\x80\xf6\xb0\n\xc0\xf1\xb8\t`\xf1\xc0\x08@\xf1\xc0\x07@\xf1\x80\x07\x98\xf4\xc0\x08\x98\xf4\xf0\x05\xa0\xf3\x88\x06\xe0\xf3h\x07\xe0\xf3\xf8\x07\xb8\xf3P\x088\xf3\x10\x08\xb0\xf2\xf8\x06\x88\xf2\x08\x06\xc8\xf2\xc0\n \xf5@\n \xf5\xd8\t\x00\xf6\xc0\n\x00\xf6\x80\x0b\xa0\xf5@\x0b\xa0\xf4@\x0b\xc0\xf4\xe8\x0b\xc0\xf4\xe8\x0b\x80\xf4\xc0\n\x18\xf4\xc0\n\xa0\xf4\xc0\n\x00\xf2\xc0\n\xe0\xf2\xb0\n\xe0\xf2\xe8\x0c \xf4@\x0c\x00\xf4(\x0c\xe0\xf2\x80\x0b0\xf2\x00\x0b`\xf3\xd0\x0c\x08\xf3\xa8\x0b\x80\xf3\xa0\x0b\x00\xf4\xc0\x0c\xe0\xf1\x00\x0c\xc0\xf1\x80\x0b\xc0\xf1\x00\x0c`\xf0\x80\x0b@\xf1 \x0c \xf2\x18\r\x10\xf2\x90\r\x98\xf2P\r\x98\xf2\xf0\x0cX\xf2\xa0\x08\xa0\xf1\x80\x08\xa0\xf1\xe0\x07\xa0\xf1\x00\x08\xa0\xf1\x80\x08@\xf1\x80\x08 \xf1\x80\x08\x00\xf1\x00\x08 \xf1\x00\x08@\xf1\x00\x08\x00\xf1\x00\x08\xe0\xf0\x00\x08\xc0\xf0\x80\x08\xe0\xf0\x80\x08\xc0\xf0\xc0\x08\x00\xf0@\x08@\xf0\xc0\x08\x80\xf0@\t\x80\xf0@\t\x00\xf0@\x0b@\xf1@\x0b\xc0\xf0 \x0b@\xf1 \x0b\xc0\xf0\x00\x0b@\xf1\x00\x0b\xc0\xf0\xe0\n@\xf1\xe0\n\xc0\xf0\xc0\n@\xf1\xc0\n\xc0\xf0\x80\n@\xf1\xa0\n\xc0\xf0H\n0\xf1\x80\n\xb0\xf0`\x0b@\xf1`\x0b\xc0\xf0\x80\x0b\xc0\xf0\x80\x0b`\xf0\xc0\x08\xc0\xf1\xc0\x07\xc0\xf1p\n\xb0\xf08\n0\xf1\x80\x08\xb0\xf0\x00\x08\xb0\xf0\xc0\n\x10\xf5\x90\x0b\xa0\xf5H\r\xb0\xf3x\r@\xf2\xe0\x08@\xf4\x80\t\xd8\xf3\xb0\n\xd8\xf3\xc0\n\xd8\xf3\x80\x0c\xe0\xef\x00\r\xe0\xef\x80\n\xe0\xef\x00\x0b\xe0\xef(\x0b\xc0\xef`\x0b\xc0\xef`\x0b\xe0\xef \x0c\xe0\xef \x0c\xc0\xefX\x0c\xc0\xef \x0c\x00\xef \x0c\xe0\xeeX\x0c\xe0\xeeX\x0c\x00\xef(\x0b\x00\xef(\x0b\xe0\xee`\x0b\xe0\xee`\x0b\x00\xefH\x0b\xc0\xef8\x0c\x00\xef8\x0c\xc0\xefH\x0b\x00\xefH\x0b \xefH\x0b\xa0\xef8\x0c \xef8\x0c\xa0\xef\x00\r@\xee\x00\x0c@\xee\x80\x0b@\xee\x80\n@\xee\x00\x0c\x00\xee\x80\x0b\x00\xee\xe0\x0b\x00\xee\xa0\x0b\x00\xee\xa0\x0b\xe8\xed\xe0\x0b\xe8\xed\xe0\x0b\xd8\xed\xe0\x0b\xc0\xed\xa0\x0b\xc0\xed\xa0\x0b\xd8\xed \x0c\xc0\xed`\x0b\xc0\xed \x0c\x00\xed`\x0b\x00\xed`\x0b@\xed`\x0b\x80\xed\x80\x0bP\xf0\x00\x0cP\xf0\x80\x0b@\xf0\x00\x0c@\xf0\xd0\x0b\x10\xee\xb0\x0b\x10\xee\xb0\x0b\x08\xee\xd0\x0b\x08\xee\xd0\x0b\x18\xed\xb0\x0b\x18\xed\xb0\x0b\x10\xed\xd0\x0b\x10\xed\x10\xff@\xf30\xff@\xf3@\xffP\xf3@\xffp\xf30\xff\x80\xf3\x10\xff\x80\xf3\x00\xffp\xf3\x00\xffP\xf3\x80\x06\xc0\xf6@\x06\xc0\xf6@\x06\xc0\xf7@\x06\xc0\xf5\x80\x06\xc0\xf5\x00\n\xc0\xf7\x00\n@\xf6\xc0\t@\xf6\x80\x08@\xf5\x80\x08\x00\xf5@\x06\x00\xf8\x80\x06\x00\xf8\xc0\t\x00\xf8\x00\n\x00\xf8\x80\x06\xc0\xf7\xc0\t\xc0\xf7\x80\x06\x00\xf5@\x06\x00\xf5@\x06@\xf5\x80\x06@\xf5\xc0\t\x80\xf5\xc0\t@\xf5\xd8\t\x80\xf5\xc0\t\x00\xf6\xc0\x07\x00\xf7\xc0\x07@\xf7\x00\x07@\xf7\x00\x07\x00\xf7\x80\x06\xd8\xf5\x80\x06\xa8\xf6\xc0\t(\xf6\x98\x08@\xf5@\x08\xe0\xf5 \t\xe0\xf5 \t \xf7@\x08 \xf7@\x08\x00\xf7`\x08\x00\xf7\x80\x08\x00\xf7\xa0\x08\x00\xf7\x00\t\x00\xf7\x00\t\x00\xf6\xa0\x08\x00\xf6\x80\x08\x00\xf6`\x08\x00\xf6@\x08\x00\xf6\xc0\x07\xc0\xf5\xc0\x07\x00\xf6\x00\x07\x00\xf6\x00\x07\xc0\xf5\xc8\x07\x08\xf6\xf8\x06\x08\xf6\xf8\x06\xb8\xf5\xc8\x07\xb8\xf5\xf8\x06\xf8\xf6\xc8\x07\xf8\xf6\xc8\x07H\xf7\xf8\x06H\xf7\xc0\r\xc0\xf0\x00\r\x80\xf0\x80\x0c\x80\xf0\x80\x0c`\xf1\x00\r`\xf1 \r\xc0\xf1\x90\r@\xf2\xc0\r\x00\xf2\x18\r\xf8\xf1\xe8\x0c\x80\xf0\xe8\x0c`\xf1(\t\x00\xf0\xd8\x08\x00\xf0\xd8\x08\x80\xf0(\t\x80\xf0\x80\x08\x88\xf1\x00\x08\x88\xf1\xc0\r\x00\xf1`\x0e\xc0\xf0\x00\x0e\xc0\xf0\xa0\x0e \xf1\x00\x0e\x00\xf1 \x0e@\xf1\xe0\r \xf2\xe0\r\xc0\xf2@\x0e@\xf3`\x0e \xf2`\x0e\xc0\xf2\xe0\x0e@\xf3\xa8\r(\xf4\x00\x0e\xc0\xf4\x80\r(\xf4 \r\xc0\xf4\xf8\x0c \xf4X\r\xb0\xf3\xd0\r\x00\xf1\xd0\r\xc0\xf0@\x05J\xf6`\x05q\xf4\x80\x06\xc0\xf4\xc8\x07\x00\xf6\xc8\x07\x00\xf7\xc8\x07@\xf5\x80\x08\xe0\xf5\xc8\x07\xe0\xf5\xc8\x07\xc0\xf7\x80\x08\xc0\xf7\x80\x08 \xf7\xc8\x07 \xf7\x80\x06\xf8\xf6\x80\x06\x08\xf6\x80\x06H\xf7\xc0\x07\xf8\xf6\xc0\x07H\xf7\xf8\x06@\xf7\x00\x07\xf8\xf6\xf8\x06@\xf5\xc0\x07\x08\xf6\xc0\x07\xb8\xf5\xf8\x06\x00\xf6\x00\x07\xb8\xf5\x80\x08\x00\xf8\x80\x08\x98\xf4\x80\x08\xc0\xf1%\x06\xc0\xf1\x80\x08 \xf0\xc0\x07\xa0\xf1\x00\x01\x80\xf2\xa0\x00\x80\xf2\xa0\x00@\xf4\x00\x01@\xf4\x00\xfdX\xf2\x00\xff\xc6\xf4\x80\xff\xdd\xf4\x80\xfd \xf3\x80\xfd\xa0\xf3\x80\xfd\xd0\xf3\x80\xff\xe3\xf1\x00\xff\xfb\xf1\xb0\xfe\t\xf2\xd8\x01\xc0\xf2@\x01@\xf4\x95\x08\xc0\xf1\x83\t\xb0\xf0\x1d\n\x80\xf0 \t\xc0\xf7 \t\x00\xf6 \t@\xf5\xc0\t\x97\xf5\x80\x0b\xab\xf1\xaa\x0c\xd6\xf2\x19\r\xef\xf1~\rX\xf2\xb8\r\n\xf2\xe7\x0b\xd6\xf1\xc0\n \xf3\xc0\x0b\xaa\xf4\x8f\x0c\xb4\xf2G\x0b\xa8\xf3\x11\r\x85\xf4\xe4\r\x11\xf2`\x0e&\xf2\x9a\x0e\xb8\xf3X\x0e(\xf4\x00\x0c\x80\xf0\x80\x0b\x80\xf0\x90\x0b\x8e\xf4 \x0c@\xee`\x0b@\xee(\x0b@\xeeX\x0c@\xee\x00\x0c\x08\xee\x80\x0b\x08\xee\xd0\x0b@\xee\x80\x0b\x10\xee \x0c\x18\xed`\x0b\x18\xed\xd0\x0b\x00\xed`\x0b\x10\xed')
+: LumpInfo(lump_id=8, name=b'LINEDEFS', position=68880, size=6650, lumpdata=b'\x00\x00\x01\x00\x01\x00\x00\x00\x00\x00\x00\x00\xff\xff\x01\x00\x02\x00\x01\x00\x00\x00\x00\x00\x01\x00\xff\xff\x03\x00\x00\x00\x01\x00\x00\x00\x00\x00\x02\x00\xff\xff\x04\x00\x03\x00\x01\x00\x00\x00\x00\x00\x03\x00\xff\xff\x02\x00\x05\x00\x01\x00\x00\x00\x00\x00\x04\x00\xff\xff\x06\x00\x04\x00\x01\x00\x00\x00\x00\x00\x05\x00\xff\xff\x05\x00\x07\x00\x01\x00\x00\x00\x00\x00\x06\x00\xff\xff\x08\x00\x06\x00\x01\x00\x00\x00\x00\x00\x07\x00\xff\xff\x07\x00\t\x00\x01\x00\x00\x00\x00\x00\x08\x00\xff\xff\n\x00\x0b\x00\x01\x00\x00\x00\x00\x00\t\x00\xff\xff\x0b\x00\x0c\x00\x01\x00\x00\x00\x00\x00\n\x00\xff\xff\x0c\x00\r\x00\x01\x00\x00\x00\x00\x00\x0b\x00\xff\xff\r\x00\n\x00\x01\x00\x00\x00\x00\x00\x0c\x00\xff\xff\x0e\x00\x0f\x00\x01\x00\x00\x00\x00\x00\r\x00\xff\xff\x0f\x00\x10\x00\x01\x00\x00\x00\x00\x00\x0e\x00\xff\xff\x10\x00\x11\x00\x01\x00\x00\x00\x00\x00\x0f\x00\xff\xff\x11\x00\x0e\x00\x01\x00\x00\x00\x00\x00\x10\x00\xff\xff\x12\x00\x13\x00\x01\x00\x00\x00\x00\x00\x11\x00\xff\xff\x13\x00\x14\x00\x01\x00\x00\x00\x00\x00\x12\x00\xff\xff\x14\x00\x15\x00\x01\x00\x00\x00\x00\x00\x13\x00\xff\xff\x15\x00\x12\x00\x01\x00\x00\x00\x00\x00\x14\x00\xff\xff\x16\x00\x17\x00\x01\x00\x00\x00\x00\x00\x15\x00\xff\xff\x17\x00\x18\x00\x01\x00\x00\x00\x00\x00\x16\x00\xff\xff\x18\x00\x19\x00\x01\x00\x00\x00\x00\x00\x17\x00\xff\xff\x19\x00\x16\x00\x01\x00\x00\x00\x00\x00\x18\x00\xff\xff\x1a\x00\x08\x00\x01\x00\x00\x00\x00\x00\x19\x00\xff\xff\x1b\x00\x1a\x00\x1d\x00\x00\x00\x00\x00\x1a\x00\x1b\x00\x1c\x00\x1b\x00\x01\x00\x00\x00\x00\x00\x1c\x00\xff\xff\x1d\x00\x1e\x00\x01\x00\x00\x00\x00\x00\x1d\x00\xff\xff\x1e\x00\x1c\x00\x1d\x00\x00\x00\x00\x00\x1e\x00\x1f\x00\x1f\x00 \x00\x1c\x00\x00\x00\x00\x00 \x00!\x00!\x00"\x00\x1c\x00\x00\x00\x00\x00"\x00#\x00\x1b\x00"\x00\x01\x00\x00\x00\x00\x00$\x00\xff\xff!\x00\x1a\x00\x01\x00\x00\x00\x00\x00%\x00\xff\xff\x1f\x00\x1c\x00\x01\x00\x00\x00\x00\x00&\x00\xff\xff\x1e\x00 \x00\x01\x00\x00\x00\x00\x00\'\x00\xff\xff"\x00\x1f\x00\x01\x00\x00\x00\x00\x00(\x00\xff\xff#\x00!\x00\x01\x00\x00\x00\x00\x00)\x00\xff\xff \x00$\x00\x01\x00\x00\x00\x00\x00*\x00\xff\xff\x0e\x00\x0b\x00\x0c\x00\x00\x00\x00\x00+\x00,\x00\x1a\x00\x0f\x00\x0c\x00\x00\x00\x00\x00-\x00.\x00\x16\x00\x1e\x00\x0c\x00\x00\x00\x00\x00/\x000\x00%\x00&\x00\x01\x00\x00\x00\x00\x001\x00\xff\xff&\x00\'\x00\x01\x00\x00\x00\x00\x002\x00\xff\xff\'\x00(\x00\x01\x00\x00\x00\x00\x003\x00\xff\xff$\x00)\x00\x01\x00\x00\x00\x00\x004\x00\xff\xff)\x00*\x00\x01\x00\x00\x00\x00\x005\x00\xff\xff+\x00#\x00\x01\x00\x00\x00\x00\x006\x00\xff\xff,\x00+\x00\x01\x00\x00\x00\x00\x007\x00\xff\xff\x03\x00\x02\x00\x1c\x00\x00\x00\x00\x008\x009\x00\x14\x00\x18\x00\x0c\x00\x00\x00\x00\x00:\x00;\x00\x11\x00\x0c\x00\x0c\x00\x00\x00\x00\x00<\x00=\x00\x0c\x00\x14\x00\x0c\x00\x00\x00\x00\x00>\x00?\x00\r\x00\x13\x00\x0c\x00\x00\x00\x00\x00@\x00A\x00\x15\x00\x17\x00\x0c\x00\x00\x00\x00\x00B\x00C\x00\t\x00-\x00\x01\x00\x00\x00\x00\x00D\x00\xff\xff.\x00%\x00\x01\x00\x00\x00\x00\x00E\x00\xff\xff.\x00-\x00\x0c\x00\x00\x00\x00\x00F\x00G\x00/\x000\x00\x01\x00\x00\x00\x00\x00H\x00\xff\xff1\x002\x00\x01\x00\x00\x00\x00\x00I\x00\xff\xff2\x003\x00\x01\x00\x00\x00\x00\x00J\x00\xff\xff3\x00.\x00\x01\x00\x00\x00\x00\x00K\x00\xff\xff-\x004\x00\x01\x00\x00\x00\x00\x00L\x00\xff\xff4\x00/\x00\x01\x00\x00\x00\x00\x00M\x00\xff\xff5\x006\x00\x04\x00\x00\x00\x00\x00N\x00O\x000\x006\x00\x11\x00\x00\x00\x00\x00P\x00\xff\xff5\x001\x00\x11\x00\x00\x00\x00\x00Q\x00\xff\xff6\x007\x00\x01\x00\x00\x00\x00\x00R\x00\xff\xff7\x008\x00\x01\x00\x00\x00\x00\x00S\x00\xff\xff8\x009\x00\x01\x00\x00\x00\x00\x00T\x00\xff\xff:\x00;\x00\x01\x00\x00\x00\x00\x00U\x00\xff\xff<\x005\x00\x01\x00\x00\x00\x00\x00V\x00\xff\xff;\x00<\x00\x01\x00\x00\x00\x00\x00W\x00\xff\xff=\x00>\x00\x14\x00\x00\x00\x00\x00X\x00Y\x00>\x00?\x00\x14\x00\x00\x00\x00\x00Z\x00[\x00?\x00@\x00\x14\x00\x00\x00\x00\x00\\\x00]\x00@\x00A\x00\x14\x00\x00\x00\x00\x00^\x00_\x00A\x00B\x00\x14\x00\x00\x00\x00\x00`\x00a\x00B\x00C\x00\x14\x00\x00\x00\x00\x00b\x00c\x00C\x00D\x00\x04\x00\x00\x00\x00\x00d\x00e\x00D\x00E\x00\x14\x00\x00\x00\x00\x00f\x00g\x00E\x00F\x00\x14\x00\x00\x00\x00\x00h\x00i\x00F\x00G\x00\x14\x00\x00\x00\x00\x00j\x00k\x00G\x00H\x00\x14\x00\x00\x00\x00\x00l\x00m\x00H\x00I\x00\x14\x00\x00\x00\x00\x00n\x00o\x00I\x00J\x00\x14\x00\x00\x00\x00\x00p\x00q\x00>\x00I\x00\x04\x00\x00\x00\x00\x00r\x00s\x00?\x00H\x00\x04\x00\x00\x00\x00\x00t\x00u\x00@\x00G\x00\x04\x00\x00\x00\x00\x00v\x00w\x00A\x00F\x00\x04\x00\x00\x00\x00\x00x\x00y\x00B\x00E\x00\x04\x00\x00\x00\x00\x00z\x00{\x00=\x00J\x00\x1c\x00\x00\x00\x00\x00|\x00}\x00J\x00K\x00\x1c\x00\x00\x00\x00\x00~\x00\x7f\x00K\x00:\x00\x01\x00\x00\x00\x00\x00\x80\x00\xff\xff9\x00L\x00\x01\x00\x00\x00\x00\x00\x81\x00\xff\xffL\x00=\x00\x1c\x00\x00\x00\x00\x00\x82\x00\x83\x00L\x00M\x00\x01\x00\x00\x00\x00\x00\x84\x00\xff\xffM\x00N\x00\x01\x00\x00\x00\x00\x00\x85\x00\xff\xffO\x00P\x00\x01\x00\x00\x00\x00\x00\x86\x00\xff\xffP\x00K\x00\x01\x00\x00\x00\x00\x00\x87\x00\xff\xffQ\x00R\x00\x01\x00\x00\x00\x00\x00\x88\x00\xff\xffS\x00T\x00\x01\x00\x00\x00\x00\x00\x89\x00\xff\xffU\x00V\x00\x01\x00\x00\x00\x00\x00\x8a\x00\xff\xffT\x00W\x00\x01\x00\x00\x00\x00\x00\x8b\x00\xff\xffX\x00Q\x00\x01\x00\x00\x00\x00\x00\x8c\x00\xff\xffY\x00Z\x00\x01\x00\x00\x00\x00\x00\x8d\x00\xff\xffR\x00[\x00\x01\x00\x00\x00\x00\x00\x8e\x00\xff\xff\\\x00S\x00\x01\x00\x00\x00\x00\x00\x8f\x00\xff\xffW\x00]\x00\x01\x00\x00\x00\x00\x00\x90\x00\xff\xff]\x00\\\x00\x01\x00\x00\x00\x00\x00\x91\x00\xff\xff[\x00^\x00\x01\x00\x00\x00\x00\x00\x92\x00\xff\xff^\x00X\x00\x01\x00\x00\x00\x00\x00\x93\x00\xff\xffZ\x00_\x00\x01\x00\x00\x00\x00\x00\x94\x00\xff\xff_\x00`\x00\x01\x00\x00\x00\x00\x00\x95\x00\xff\xffa\x00U\x00\x01\x00\x00\x00\x00\x00\x96\x00\xff\xffb\x00a\x00\x01\x00\x00\x00\x00\x00\x97\x00\xff\xffO\x00N\x00\x1c\x00\x00\x00\x00\x00\x98\x00\x99\x00Y\x00Q\x00\x1d\x00\x00\x00\x00\x00\x9a\x00\x9b\x00X\x00Z\x00\x1c\x00\x00\x00\x00\x00\x9c\x00\x9d\x00T\x00V\x00\x1d\x00\x00\x00\x00\x00\x9e\x00\x9f\x00U\x00W\x00\x1c\x00\x00\x00\x00\x00\xa0\x00\xa1\x00R\x00S\x00\x1d\x00\x00\x00\x00\x00\xa2\x00\xa3\x00\\\x00[\x00\x1c\x00\x00\x00\x00\x00\xa4\x00\xa5\x00c\x00b\x00\x01\x00\x00\x00\x00\x00\xa6\x00\xff\xff`\x00d\x00\x01\x00\x00\x00\x00\x00\xa7\x00\xff\xffd\x00e\x00\x01\x00\x00\x00\x00\x00\xa8\x00\xff\xffe\x00f\x00\x01\x00\x00\x00\x00\x00\xa9\x00\xff\xfff\x00g\x00\x01\x00\x00\x00\x00\x00\xaa\x00\xff\xffg\x00h\x00\x01\x00\x00\x00\x00\x00\xab\x00\xff\xffh\x00c\x00\x01\x00\x00\x00\x00\x00\xac\x00\xff\xffd\x00i\x00\x9c\x00\x00\x00\x00\x00\xad\x00\xae\x00i\x00j\x00\x9c\x00\x00\x00\x00\x00\xaf\x00\xb0\x00j\x00c\x00\x9c\x00\x00\x00\x00\x00\xb1\x00\xb2\x00V\x00k\x00\x01\x00\x00\x00\x00\x00\xb3\x00\xff\xffk\x00O\x00\x01\x00\x00\x00\x00\x00\xb4\x00\xff\xffN\x00l\x00\x01\x00\x00\x00\x00\x00\xb5\x00\xff\xffl\x00Y\x00\x01\x00\x00\x00\x00\x00\xb6\x00\xff\xffm\x00n\x00\x1c\x00\x00\x00\x00\x00\xb7\x00\xb8\x00n\x00o\x00\x1c\x00\x00\x00\x00\x00\xb9\x00\xba\x00o\x00p\x00\x1c\x00\x00\x00\x00\x00\xbb\x00\xbc\x00p\x00m\x00\x1c\x00\x00\x00\x00\x00\xbd\x00\xbe\x00q\x00r\x00\x1c\x00\x00\x00\x00\x00\xbf\x00\xc0\x00r\x00s\x00\x1c\x00\x00\x00\x00\x00\xc1\x00\xc2\x00s\x00t\x00\x1c\x00\x00\x00\x00\x00\xc3\x00\xc4\x00t\x00q\x00\x1c\x00\x00\x00\x00\x00\xc5\x00\xc6\x00(\x00u\x00\x01\x00\x00\x00\x00\x00\xc7\x00\xff\xffv\x00\x1d\x00\x01\x00\x00\x00\x00\x00\xc8\x00\xff\xffw\x00v\x00\x01\x00\x00\x00\x00\x00\xc9\x00\xff\xffu\x00x\x00\x01\x00\x00\x00\x00\x00\xca\x00\xff\xff\x1d\x00(\x00\x0c\x00\x00\x00\x00\x00\xcb\x00\xcc\x00x\x00w\x00\x0c\x00\x00\x00\x00\x00\xcd\x00\xce\x00y\x00z\x00\x04\x00\x01\x00\x00\x00\xcf\x00\xd0\x00{\x00|\x00\x04\x00\x01\x00\x00\x00\xd1\x00\xd2\x00z\x00w\x00\x01\x00\x00\x00\x00\x00\xd3\x00\xff\xffx\x00y\x00\x01\x00\x00\x00\x00\x00\xd4\x00\xff\xffy\x00|\x00\x11\x00\x00\x00\x00\x00\xd5\x00\xff\xff{\x00z\x00\x11\x00\x00\x00\x00\x00\xd6\x00\xff\xff}\x00{\x00\x01\x00\x00\x00\x00\x00\xd7\x00\xff\xff|\x00~\x00\x01\x00\x00\x00\x00\x00\xd8\x00\xff\xff\x7f\x00\x80\x00\x01\x00\x00\x00\x00\x00\xd9\x00\xff\xff\x80\x00\x81\x00\x01\x00\x00\x00\x00\x00\xda\x00\xff\xff\x82\x00,\x00\x01\x00\x00\x00\x00\x00\xdb\x00\xff\xff*\x00\x83\x00\x01\x00\x00\x00\x00\x00\xdc\x00\xff\xff\x83\x00\x84\x00\x01\x00\x00\x00\x00\x00\xdd\x00\xff\xff\x85\x00\x86\x00\x1c\x00\x00\x00\x00\x00\xde\x00\xdf\x00\x86\x00\x87\x00\x1c\x00\x00\x00\x00\x00\xe0\x00\xe1\x00\x87\x00\x88\x00\x1c\x00\x00\x00\x00\x00\xe2\x00\xe3\x00\x88\x00\x89\x00\x1c\x00\x00\x00\x00\x00\xe4\x00\xe5\x00\x89\x00\x8a\x00\x1c\x00\x00\x00\x00\x00\xe6\x00\xe7\x00\x8a\x00\x8b\x00\x1c\x00\x00\x00\x00\x00\xe8\x00\xe9\x00\x8b\x00\x8c\x00\x1c\x00\x00\x00\x00\x00\xea\x00\xeb\x00\x8c\x00\x85\x00\x1c\x00\x00\x00\x00\x00\xec\x00\xed\x00\x8d\x00\x8e\x00\x01\x00\x00\x00\x00\x00\xee\x00\xff\xff\x8f\x00\x90\x00\x01\x00\x00\x00\x00\x00\xef\x00\xff\xff\x90\x00\x91\x00\x01\x00\x00\x00\x00\x00\xf0\x00\xff\xff\x92\x00\x93\x00\x01\x00\x00\x00\x00\x00\xf1\x00\xff\xff\x94\x00\x95\x00\x01\x00\x00\x00\x00\x00\xf2\x00\xff\xff\x96\x00\x97\x00\x01\x00\x00\x00\x00\x00\xf3\x00\xff\xff\x98\x00\x99\x00\x01\x00\x00\x00\x00\x00\xf4\x00\xff\xff\x9a\x00\x7f\x00\x01\x00\x00\x00\x00\x00\xf5\x00\xff\xff\x99\x00\x9a\x00\x01\x00\x00\x00\x00\x00\xf6\x00\xff\xff\x95\x00\x9b\x00\x01\x00\x00\x00\x00\x00\xf7\x00\xff\xff\x9c\x00\x9b\x00\x06\x00\x00\x00\x00\x00\xf8\x00\xf9\x00\x9d\x00\x9e\x00\x06\x00\x00\x00\x00\x00\xfa\x00\xfb\x00\x9f\x00\x9d\x00\x06\x00\x00\x00\x00\x00\xfc\x00\xfd\x00\xa0\x00\xa1\x00\x06\x00\x00\x00\x00\x00\xfe\x00\xff\x00\xa2\x00\x9f\x00\x06\x00\x00\x00\x00\x00\x00\x01\x01\x01\xa1\x00\x9c\x00\x06\x00\x00\x00\x00\x00\x02\x01\x03\x01\xa3\x00\xa4\x00\x01\x00\x00\x00\x00\x00\x04\x01\xff\xff\xa5\x00\x98\x00\x01\x00\x00\x00\x00\x00\x05\x01\xff\xff\xa4\x00\xa6\x00\x01\x00\x00\x00\x00\x00\x06\x01\xff\xff\xa7\x00\xa5\x00\x01\x00\x00\x00\x00\x00\x07\x01\xff\xff\x8d\x00\x91\x00\x04\x00\x00\x00\x00\x00\x08\x01\t\x01\x99\x00\x9e\x00\x84\x00\x00\x00\x00\x00\n\x01\x0b\x01\x9e\x00\xa4\x00\x84\x00\x00\x00\x00\x00\x0c\x01\r\x01\x96\x00\x94\x00\x84\x00X\x00\x02\x00\x0e\x01\x0f\x01\x9e\x00\x98\x00\x06\x00\x00\x00\x00\x00\x10\x01\x11\x01\xa8\x00\xa0\x00\x06\x00\x00\x00\x00\x00\x12\x01\x13\x01\xa3\x00\xa8\x00\x04\x00\x00\x00\x00\x00\x14\x01\x15\x01\xa9\x00\xa3\x00\x01\x00\x00\x00\x00\x00\x16\x01\xff\xff\xaa\x00\xab\x00\x04\x00\x00\x00\x00\x00\x17\x01\x18\x01\xab\x00\xac\x00\x04\x00\x00\x00\x00\x00\x19\x01\x1a\x01\xac\x00\xa9\x00\x04\x00\x00\x00\x00\x00\x1b\x01\x1c\x01\x81\x00\xad\x00\x01\x00\x00\x00\x00\x00\x1d\x01\xff\xff\xad\x00\xae\x00\x01\x00\x00\x00\x00\x00\x1e\x01\xff\xff\xaf\x00\x82\x00\x01\x00\x00\x00\x00\x00\x1f\x01\xff\xff\xb0\x00\xaf\x00\x01\x00\x00\x00\x00\x00 \x01\xff\xff\xb1\x00\xb2\x00\x01\x00\x00\x00\x00\x00!\x01\xff\xff\xb2\x00\xb3\x00\x01\x00\x00\x00\x00\x00"\x01\xff\xff\xb4\x00\xb5\x00\x01\x00\x00\x00\x00\x00#\x01\xff\xff\xb6\x00\xb4\x00\x01\x00\x00\x00\x00\x00$\x01\xff\xff\xb7\x00\xb6\x00\x01\x00\x00\x00\x00\x00%\x01\xff\xff\xb8\x00\xb7\x00\x01\x00\x00\x00\x00\x00&\x01\xff\xff\xb3\x00\xb9\x00\x01\x00\x00\x00\x00\x00\'\x01\xff\xff\xb9\x00\xba\x00\x01\x00\x00\x00\x00\x00(\x01\xff\xff\xbb\x00\xbc\x00\x01\x00\x00\x00\x00\x00)\x01\xff\xff\xae\x00\xb0\x00\x0c\x00\x00\x00\x00\x00*\x01+\x01\xb5\x00\xb1\x00\x0c\x00\x00\x00\x00\x00,\x01-\x01\xb4\x00\xb2\x00\x0c\x00\x00\x00\x00\x00.\x01/\x01\xb6\x00\xb3\x00\x0c\x00\x00\x00\x00\x000\x011\x01\xb7\x00\xb9\x00\x0c\x00\x00\x00\x00\x002\x013\x01\xb8\x00\xba\x00\x0c\x00\x00\x00\x00\x004\x015\x01\xbb\x00\xbd\x00\x0c\x00\x00\x00\x00\x006\x017\x01\xbe\x00\xbf\x00\x0c\x00\x00\x00\x00\x008\x019\x01\xc0\x00\xc1\x00\x0c\x00\x00\x00\x00\x00:\x01;\x01\xc2\x00\xc3\x00\x0c\x00\x00\x00\x00\x00<\x01=\x01\xc4\x00\xc5\x00\x0c\x00\x00\x00\x00\x00>\x01?\x01\xc6\x00\xc7\x00\x0c\x00\x00\x00\x00\x00@\x01A\x01\xc8\x00\xc9\x00\x0c\x00\x00\x00\x00\x00B\x01C\x01\xca\x00\xcb\x00\x0c\x00\x00\x00\x00\x00D\x01E\x01\xcc\x00\xcd\x00\x0e\x00\x00\x00\x00\x00F\x01G\x01\xcc\x00\xca\x00\x01\x00\x00\x00\x00\x00H\x01\xff\xff\xcb\x00\xcd\x00\x01\x00\x00\x00\x00\x00I\x01\xff\xff\xca\x00\xc8\x00\x01\x00\x00\x00\x00\x00J\x01\xff\xff\xc8\x00\xc6\x00\x01\x00\x00\x00\x00\x00K\x01\xff\xff\xc6\x00\xc4\x00\x01\x00\x00\x00\x00\x00L\x01\xff\xff\xc4\x00\xc2\x00\x01\x00\x00\x00\x00\x00M\x01\xff\xff\xc2\x00\xc0\x00\x01\x00\x00\x00\x00\x00N\x01\xff\xff\xc1\x00\xc3\x00\x01\x00\x00\x00\x00\x00O\x01\xff\xff\xc3\x00\xc5\x00\x01\x00\x00\x00\x00\x00P\x01\xff\xff\xc5\x00\xc7\x00\x01\x00\x00\x00\x00\x00Q\x01\xff\xff\xc7\x00\xc9\x00\x01\x00\x00\x00\x00\x00R\x01\xff\xff\xc9\x00\xcb\x00\x01\x00\x00\x00\x00\x00S\x01\xff\xff\xc0\x00\xce\x00\x01\x00\x00\x00\x00\x00T\x01\xff\xff\xcf\x00\xc1\x00\x01\x00\x00\x00\x00\x00U\x01\xff\xff\xd0\x00\xcf\x00\x11\x00\x00\x00\x00\x00V\x01\xff\xff\xce\x00\xa7\x00\x11\x00\x00\x00\x00\x00W\x01\xff\xff\xd0\x00\xa7\x00$\x00\x01\x00\x00\x00X\x01Y\x01\xce\x00\xcf\x00\x04\x00\x01\x00\x00\x00Z\x01[\x01\xd1\x00\xd0\x00\x01\x00\x00\x00\x00\x00\\\x01\xff\xff\x7f\x00\xd2\x00\x9c\x00\x00\x00\x00\x00]\x01^\x01\xd2\x00\xd3\x00\x1c\x00\x00\x00\x00\x00_\x01`\x01\xd3\x00#\x00\x9c\x00\x00\x00\x00\x00a\x01b\x01\xd3\x00\x82\x00\x1c\x00\x00\x00\x00\x00c\x01d\x01\x81\x00\xd2\x00\x1c\x00\x00\x00\x00\x00e\x01f\x01\xcd\x00\xd4\x00\x01\x00\x00\x00\x00\x00g\x01\xff\xff\xd4\x00\xbf\x00\x01\x00\x00\x00\x00\x00h\x01\xff\xff\xbe\x00\xd5\x00\x01\x00\x00\x00\x00\x00i\x01\xff\xff\xd5\x00\xcc\x00\x01\x00\x00\x00\x00\x00j\x01\xff\xff\xba\x00\xd6\x00\x01\x00\x00\x00\x00\x00k\x01\xff\xff\xd6\x00\xbd\x00\x01\x00\x00\x00\x00\x00l\x01\xff\xff\xbc\x00\xd7\x00\x01\x00\x00\x00\x00\x00m\x01\xff\xff\xd7\x00\xb8\x00\x01\x00\x00\x00\x00\x00n\x01\xff\xff\x96\x00\xa2\x00\x06\x00\x00\x00\x00\x00o\x01p\x01\x93\x00\xd8\x00\x01\x00\x00\x00\x00\x00q\x01\xff\xff\xd8\x00\x8d\x00\x01\x00\x00\x00\x00\x00r\x01\xff\xff\x91\x00\xd9\x00\x01\x00\x00\x00\x00\x00s\x01\xff\xff\xd9\x00\x94\x00\x01\x00\x00\x00\x00\x00t\x01\xff\xff\xda\x00\xaa\x00\x01\x00\x00\x00\x00\x00u\x01\xff\xff\xaa\x00\xdb\x00\x01\x00\x00\x00\x00\x00v\x01\xff\xff\xdb\x00\xa9\x00\x0c\x00\x00\x00\x00\x00w\x01x\x01\x84\x00\xdc\x00\x01\x00\x00\x00\x00\x00y\x01\xff\xff\xdc\x00\xdd\x00\x01\x00\x00\x00\x00\x00z\x01\xff\xff\xdd\x00\xde\x00\x01\x00\x00\x00\x00\x00{\x01\xff\xff\xde\x00\xdf\x00\x01\x00\x00\x00\x00\x00|\x01\xff\xff\x99\x00\xdf\x00\x1d\x00\x00\x00\x00\x00}\x01~\x01\xde\x00\x9a\x00\x1d\x00\x00\x00\x00\x00\x7f\x01\x80\x01\xdf\x00\x96\x00\x01\x00\x00\x00\x00\x00\x81\x01\xff\xff\xe0\x00\xe1\x00\x01\x00\x00\x00\x00\x00\x82\x01\xff\xff\xe2\x00\xe3\x00\x01\x00\x00\x00\x00\x00\x83\x01\xff\xff\xe3\x00\xe4\x00\x01\x00\x00\x00\x00\x00\x84\x01\xff\xff\xe5\x00\xe6\x00\x01\x00\x00\x00\x00\x00\x85\x01\xff\xff\xe7\x00\xe8\x00\x01\x00\x00\x00\x00\x00\x86\x01\xff\xff\xe9\x00\xe0\x00\x01\x00\x00\x00\x00\x00\x87\x01\xff\xff\xea\x00\xeb\x00\x01\x00\x00\x00\x00\x00\x88\x01\xff\xff\xeb\x00\xec\x00\x01\x00\x00\x00\x00\x00\x89\x01\xff\xff\xec\x00\xed\x00\x01\x00\x00\x00\x00\x00\x8a\x01\xff\xff\xee\x00\xef\x00\x01\x00\x00\x00\x00\x00\x8b\x01\xff\xff\xef\x00\xf0\x00\x01\x00\x00\x00\x00\x00\x8c\x01\xff\xff\xf0\x00\xf1\x00\x01\x00\x00\x00\x00\x00\x8d\x01\xff\xff\xe4\x00\xf2\x00\x01\x00\x00\x00\x00\x00\x8e\x01\xff\xff\xf2\x00\xe5\x00\x01\x00\x00\x00\x00\x00\x8f\x01\xff\xff\xed\x00\xf3\x00\x01\x00\x00\x00\x00\x00\x90\x01\xff\xff\xf3\x00\xea\x00\x01\x00\x00\x00\x00\x00\x91\x01\xff\xff\xe8\x00\xf4\x00\x01\x00\x00\x00\x00\x00\x92\x01\xff\xff\xf4\x00\xe9\x00\x01\x00\x00\x00\x00\x00\x93\x01\xff\xff\xf1\x00\xf5\x00\x01\x00\x00\x00\x00\x00\x94\x01\xff\xff\xf5\x00\xee\x00\x01\x00\x00\x00\x00\x00\x95\x01\xff\xff\xf5\x00\xf6\x00\x05\x00\x00\x00\x00\x00\x96\x01\x97\x01\xf6\x00\xf7\x00\x05\x00\x00\x00\x00\x00\x98\x01\x99\x01\xf7\x00\xf2\x00\x05\x00\x00\x00\x00\x00\x9a\x01\x9b\x01\xf8\x00\xf3\x00\x05\x00\x00\x00\x00\x00\x9c\x01\x9d\x01\xf4\x00\xf9\x00\x05\x00\x00\x00\x00\x00\x9e\x01\x9f\x01\xf9\x00\xf8\x00\x05\x00\x00\x00\x00\x00\xa0\x01\xa1\x01\xfa\x00\xfb\x00\x01\x00\x00\x00\x00\x00\xa2\x01\xff\xff\xfc\x00\xfd\x00\x01\x00\x00\x00\x00\x00\xa3\x01\xff\xff\xfb\x00\xfe\x00\x01\x00\x00\x00\x00\x00\xa4\x01\xff\xff\xff\x00\xfc\x00\x01\x00\x00\x00\x00\x00\xa5\x01\xff\xff\xe5\x00\xe8\x00\x0c\x00$\x00\x01\x00\xa6\x01\xa7\x01\xea\x00\xf1\x00\x0c\x00\x00\x00\x00\x00\xa8\x01\xa9\x01\xa6\x00\xd1\x00\x0c\x00\x00\x00\x00\x00\xaa\x01\xab\x01\xfd\x00\xe2\x00\x01\x00\x00\x00\x00\x00\xac\x01\xff\xff\xe1\x00\xfa\x00\x01\x00\x00\x00\x00\x00\xad\x01\xff\xff\xee\x00\xe4\x00\x0c\x00\x00\x00\x00\x00\xae\x01\xaf\x01\xe9\x00\xed\x00\x0c\x00\x00\x00\x00\x00\xb0\x01\xb1\x01\xfc\x00\xfb\x00\x0c\x00\x00\x00\x00\x00\xb2\x01\xb3\x01\xfe\x00\x00\x01\x01\x00\x00\x00\x00\x00\xb4\x01\xff\xff\x01\x01\xff\x00\x01\x00\x00\x00\x00\x00\xb5\x01\xff\xff\x02\x01\x01\x01\x01\x00\x00\x00\x00\x00\xb6\x01\xff\xff\x00\x01\x03\x01\x01\x00\x00\x00\x00\x00\xb7\x01\xff\xff\x03\x01\x04\x01\x11\x00\x00\x00\x00\x00\xb8\x01\xff\xff\x04\x01\x05\x01\x01\x00\x00\x00\x00\x00\xb9\x01\xff\xff\x06\x01\x07\x01\x01\x00\x00\x00\x00\x00\xba\x01\xff\xff\x07\x01\x02\x01\x11\x00\x00\x00\x00\x00\xbb\x01\xff\xff\x07\x01\x04\x01\x04\x00\x01\x00\x00\x00\xbc\x01\xbd\x01\x03\x01\x02\x01\x04\x00\x01\x00\x00\x00\xbe\x01\xbf\x01\x05\x01\x08\x01\x11\x00\x00\x00\x00\x00\xc0\x01\xff\xff\t\x01\x06\x01\x11\x00\x00\x00\x00\x00\xc1\x01\xff\xff\x08\x01\n\x01\x11\x00\x00\x00\x00\x00\xc2\x01\xff\xff\x0b\x01\x0c\x01\x11\x00\x00\x00\x00\x00\xc3\x01\xff\xff\x0c\x01\r\x01\x11\x00\x0b\x00\x00\x00\xc4\x01\xff\xff\r\x01\t\x01\x11\x00\x00\x00\x00\x00\xc5\x01\xff\xff\n\x01\x0b\x01\x11\x00\x00\x00\x00\x00\xc6\x01\xff\xff\x06\x01\x05\x01\x0c\x00\x00\x00\x00\x00\xc7\x01\xc8\x01\x0e\x01\xd1\x00\x01\x00\x00\x00\x00\x00\xc9\x01\xff\xff\xa6\x00\x0f\x01\x01\x00\x00\x00\x00\x00\xca\x01\xff\xff\xe6\x00\x10\x01\x01\x00\x00\x00\x00\x00\xcb\x01\xff\xff\x10\x01\x0e\x01\x11\x00\x00\x00\x00\x00\xcc\x01\xff\xff\x0f\x01\x11\x01\x11\x00\x00\x00\x00\x00\xcd\x01\xff\xff\x11\x01\xe7\x00\x01\x00\x00\x00\x00\x00\xce\x01\xff\xff\x0f\x01\x0e\x01\x04\x00\x01\x00\x00\x00\xcf\x01\xd0\x01\x10\x01\x11\x01\x04\x00\x01\x00\x00\x00\xd1\x01\xd2\x01\x12\x01\x13\x01\x04\x00\x00\x00\x00\x00\xd3\x01\xd4\x01\x14\x01\x15\x01\x04\x00\x00\x00\x00\x00\xd5\x01\xd6\x01\x15\x01\x12\x01\x04\x00\x00\x00\x00\x00\xd7\x01\xd8\x01\x13\x01\x14\x01\x04\x00\x00\x00\x00\x00\xd9\x01\xda\x01\x00\x01\x01\x01\x0c\x00\x00\x00\x00\x00\xdb\x01\xdc\x01\x16\x01\x17\x01\x04\x00\x00\x00\x00\x00\xdd\x01\xde\x01\x18\x01\x19\x01\x04\x00\x00\x00\x00\x00\xdf\x01\xe0\x01\x19\x01\x16\x01\x04\x00\x00\x00\x00\x00\xe1\x01\xe2\x01\x17\x01\x18\x01\x04\x00\x00\x00\x00\x00\xe3\x01\xe4\x01\x97\x00\x92\x00\x01\x00\x00\x00\x00\x00\xe5\x01\xff\xff\x1a\x01\x1b\x01\x1c\x000\x00\x00\x00\xe6\x01\xe7\x01\x1b\x01\x1c\x01\x1c\x000\x00\x00\x00\xe8\x01\xe9\x01\x1c\x01\x1d\x01\x1c\x000\x00\x00\x00\xea\x01\xeb\x01\x1d\x01\x1e\x01\x1c\x000\x00\x00\x00\xec\x01\xed\x01\x1e\x01\x1f\x01\x1c\x000\x00\x00\x00\xee\x01\xef\x01\x1f\x01 \x01\x1c\x000\x00\x00\x00\xf0\x01\xf1\x01 \x01!\x01\x1c\x000\x00\x00\x00\xf2\x01\xf3\x01!\x01\x1a\x01\x1c\x000\x00\x00\x00\xf4\x01\xf5\x01"\x01#\x01\x01\x00\x00\x00\x00\x00\xf6\x01\xff\xff#\x01$\x01\x01\x00\x00\x00\x00\x00\xf7\x01\xff\xff%\x01&\x01\x01\x00\x00\x00\x00\x00\xf8\x01\xff\xff\'\x01(\x01\x01\x00\x00\x00\x00\x00\xf9\x01\xff\xff(\x01)\x01\x01\x00\x00\x00\x00\x00\xfa\x01\xff\xff*\x01+\x01\x01\x00\x00\x00\x00\x00\xfb\x01\xff\xff,\x01-\x01\x01\x00\x00\x00\x00\x00\xfc\x01\xff\xff-\x01.\x01\x01\x00\x00\x00\x00\x00\xfd\x01\xff\xff.\x01/\x01\x01\x00\x00\x00\x00\x00\xfe\x01\xff\xff/\x01\'\x01\x01\x00\x00\x00\x00\x00\xff\x01\xff\xff$\x01,\x01\x01\x00\x00\x00\x00\x00\x00\x02\xff\xff"\x010\x01\x0c\x00\x00\x00\x00\x00\x01\x02\x02\x020\x011\x01\x0c\x00\x00\x00\x00\x00\x03\x02\x04\x021\x01)\x01\x0c\x00\x00\x00\x00\x00\x05\x02\x06\x02+\x012\x01\x01\x00\x00\x00\x00\x00\x07\x02\xff\xff2\x013\x01\x01\x00\x00\x00\x00\x00\x08\x02\xff\xff3\x014\x01\x01\x00\x00\x00\x00\x00\t\x02\xff\xff4\x01%\x01\x01\x00\x00\x00\x00\x00\n\x02\xff\xff*\x015\x01\x0c\x00\x00\x00\x00\x00\x0b\x02\x0c\x025\x01&\x01\x0c\x00\x00\x00\x00\x00\r\x02\x0e\x026\x017\x01\x01\x00\x00\x00\x00\x00\x0f\x02\xff\xff\x8e\x008\x01\x01\x00\x00\x00\x00\x00\x10\x02\xff\xff9\x01\x8f\x00\x01\x00\x00\x00\x00\x00\x11\x02\xff\xff8\x016\x01\x01\x00\x00\x00\x00\x00\x12\x02\xff\xff}\x00~\x00\x0c\x00\x00\x00\x00\x00\x13\x02\x14\x029\x016\x01\x0c\x00\x00\x00\x00\x00\x15\x02\x16\x02:\x01;\x01\x1c\x00\x00\x00\x00\x00\x17\x02\x18\x02;\x01<\x01\x1c\x00\x00\x00\x00\x00\x19\x02\x1a\x02<\x01=\x01\x1c\x00\x00\x00\x00\x00\x1b\x02\x1c\x02=\x01:\x01\x1c\x00\x00\x00\x00\x00\x1d\x02\x1e\x02&\x01>\x01\x01\x00\x00\x00\x00\x00\x1f\x02\xff\xff>\x01}\x00\x01\x00\x00\x00\x00\x00 \x02\xff\xff~\x00?\x01\x01\x00\x00\x00\x00\x00!\x02\xff\xff?\x01"\x01\x01\x00\x00\x00\x00\x00"\x02\xff\xff)\x01@\x01\x01\x00\x00\x00\x00\x00#\x02\xff\xff@\x019\x01\x01\x00\x00\x00\x00\x00$\x02\xff\xff7\x01A\x01\x01\x00\x00\x00\x00\x00%\x02\xff\xffA\x01*\x01\x01\x00\x00\x00\x00\x00&\x02\xff\xffB\x01C\x01\x01\x00\x00\x00\x00\x00\'\x02\xff\xffC\x01D\x01\x01\x00\x00\x00\x00\x00(\x02\xff\xffD\x01E\x01\x01\x00\x00\x00\x00\x00)\x02\xff\xffE\x01F\x01\x01\x00\x00\x00\x00\x00*\x02\xff\xffF\x01G\x01\x01\x00\x00\x00\x00\x00+\x02\xff\xffG\x01H\x01\x01\x00\x00\x00\x00\x00,\x02\xff\xffH\x01I\x01\x01\x00\x00\x00\x00\x00-\x02\xff\xffI\x01J\x01\x01\x00\x00\x00\x00\x00.\x02\xff\xffJ\x01K\x01\x01\x00\x00\x00\x00\x00/\x02\xff\xffK\x01L\x01\x01\x00\x00\x00\x00\x000\x02\xff\xffL\x01M\x01\x01\x00\x00\x00\x00\x001\x02\xff\xffM\x01N\x01\x01\x00\x00\x00\x00\x002\x02\xff\xffN\x01O\x01\x01\x00\x00\x00\x00\x003\x02\xff\xffO\x01B\x01\x01\x00\x00\x00\x00\x004\x02\xff\xffG\x01N\x01\x0c\x00\x00\x00\x00\x005\x026\x02H\x01M\x01\x0c\x00\x00\x00\x00\x007\x028\x02I\x01L\x01\x0c\x00\x00\x00\x00\x009\x02:\x02P\x01Q\x01\x1c\x00\x00\x00\x00\x00;\x02<\x02Q\x01R\x01\x1c\x00\x00\x00\x00\x00=\x02>\x02R\x01S\x01\x1c\x00\x00\x00\x00\x00?\x02@\x02S\x01P\x01\x1c\x00\x00\x00\x00\x00A\x02B\x02T\x01U\x01\x1c\x00\x00\x00\x00\x00C\x02D\x02U\x01V\x01\x1c\x00\x00\x00\x00\x00E\x02F\x02V\x01W\x01\x1c\x00\x00\x00\x00\x00G\x02H\x02W\x01T\x01\x1c\x00\x00\x00\x00\x00I\x02J\x02X\x01Y\x01\x1c\x00\x00\x00\x00\x00K\x02L\x02Y\x01Z\x01\x1c\x00\x00\x00\x00\x00M\x02N\x02Z\x01[\x01\x1c\x00\x00\x00\x00\x00O\x02P\x02[\x01X\x01\x1c\x00\x00\x00\x00\x00Q\x02R\x02\x8e\x00\x90\x00\x04\x00\x00\x00\x00\x00S\x02T\x02\\\x01]\x01\x01\x00\x00\x00\x00\x00U\x02\xff\xff^\x01_\x01\x01\x00\x00\x00\x00\x00V\x02\xff\xff`\x01a\x01\x01\x00\x00\x00\x00\x00W\x02\xff\xff]\x01`\x01\x0c\x00\x00\x00\x00\x00X\x02Y\x02\xdb\x00b\x01\x01\x00\x00\x00\x00\x00Z\x02\xff\xffb\x01c\x01\x01\x00\x00\x00\x00\x00[\x02\xff\xffa\x01d\x01\x01\x00\x00\x00\x00\x00\\\x02\xff\xffd\x01\xa9\x00\x01\x00\x00\x00\x00\x00]\x02\xff\xff]\x01e\x01\x01\x00\x00\x00\x00\x00^\x02\xff\xffe\x01^\x01\x01\x00\x00\x00\x00\x00_\x02\xff\xff_\x01f\x01\x01\x00\x00\x00\x00\x00`\x02\xff\xfff\x01`\x01\x01\x00\x00\x00\x00\x00a\x02\xff\xff\xbf\x00g\x01\x01\x00\x00\x00\x00\x00b\x02\xff\xffg\x01h\x01\x01\x00\x00\x00\x00\x00c\x02\xff\xffh\x01\xbb\x00\x01\x00\x00\x00\x00\x00d\x02\xff\xff\xbd\x00i\x01\x01\x00\x00\x00\x00\x00e\x02\xff\xffi\x01j\x01\x01\x00\x00\x00\x00\x00f\x02\xff\xffj\x01\xbe\x00\x01\x00\x00\x00\x00\x00g\x02\xff\xff\xae\x00k\x01\x01\x00\x00\x00\x00\x00h\x02\xff\xffk\x01\xb1\x00\x01\x00\x00\x00\x00\x00i\x02\xff\xff\xb5\x00l\x01\x01\x00\x00\x00\x00\x00j\x02\xff\xffl\x01\xb0\x00\x01\x00\x00\x00\x00\x00k\x02\xff\xffc\x01m\x01\x01\x00\x00\x00\x00\x00l\x02\xff\xffn\x01o\x01\x01\x00\x00\x00\x00\x00m\x02\xff\xffp\x01n\x01\x01\x00\x00\x00\x00\x00n\x02\xff\xffq\x01r\x01\x01\x00\x00\x00\x00\x00o\x02\xff\xffr\x01s\x01\x01\x00\x00\x00\x00\x00p\x02\xff\xffs\x01t\x01\x01\x00\x00\x00\x00\x00q\x02\xff\xfft\x01u\x01\x01\x00\x00\x00\x00\x00r\x02\xff\xffv\x01p\x01\x01\x00\x00\x00\x00\x00s\x02\xff\xffw\x01v\x01\x01\x00\x00\x00\x00\x00t\x02\xff\xffx\x01w\x01\x01\x00\x00\x00\x00\x00u\x02\xff\xffu\x01y\x01\x01\x00\x00\x00\x00\x00v\x02\xff\xffz\x01x\x01\x01\x00\x00\x00\x00\x00w\x02\xff\xffy\x01{\x01\x01\x00\x00\x00\x00\x00x\x02\xff\xff|\x01z\x01\x01\x00\x00\x00\x00\x00y\x02\xff\xff\x9b\x00\xda\x00\x1e\x00\x00\x00\x00\x00z\x02{\x02m\x01\\\x01\x0e\x00\x00\x00\x00\x00|\x02}\x02q\x01o\x01\x1e\x00\x00\x00\x00\x00~\x02\x7f\x02\x9b\x00}\x01\x01\x00\x00\x00\x00\x00\x80\x02\xff\xff}\x01|\x01\x01\x00\x00\x00\x00\x00\x81\x02\xff\xff{\x01~\x01\x01\x00\x00\x00\x00\x00\x82\x02\xff\xff~\x01\xda\x00\x01\x00\x00\x00\x00\x00\x83\x02\xff\xffm\x01\x7f\x01\x01\x00\x00\x00\x00\x00\x84\x02\xff\xff\x7f\x01q\x01\x01\x00\x00\x00\x00\x00\x85\x02\xff\xffo\x01\x80\x01\x01\x00\x00\x00\x00\x00\x86\x02\xff\xff\x80\x01\\\x01\x01\x00\x00\x00\x00\x00\x87\x02\xff\xff')
+
+
+#+BEGIN_SRC sqlite :db waddata.db
+  .headers on
+  .mode columns
+  SELECT lump_id,
+         name,
+         position,
+         size,
+         LENGTH(lumpdata) -- for sanity checking
+  FROM LumpInfo;
+#+END_SRC
+#+RESULTS:
+| lump_id      name        position    size        LENGTH(lumpdata) |
+| ----------  ----------  ----------  ----------  ---------------- |
+| 6           E1M1        67500       0                            |
+| 7           THINGS      67500       1380        1380             |
+| 8           LINEDEFS    68880       6650        6650             |
+| 9           SIDEDEFS    75532       19440       19440            |
+| 10          VERTEXES    94972       1868        1868             |
+| 11          SEGS        96840       8784        8784             |
+| 12          SSECTORS    105624      948         948              |
+| 13          NODES       106572      6608        6608             |
+| 14          SECTORS     113180      2210        2210             |
+| 15          REJECT      115392      904         904              |
+| 16          BLOCKMAP    116296      6922        6922             |
+
+
+Now that the lumps are in a database I can manipulate them and extract more information from them.
+
+Next I can check the relationship between map vertices and lines (VERTEXES, LINEDEFS)
+
+#+BEGIN_SRC  python :python python3 :tangle vertex.py :results output :noweb yes
+  <<dependencies>>
+
+  from lump import build_lump_database, retrieve_vertexes
+  import pprint
+  import sqlite3
+  from io import BytesIO  # To read lump data like files.
+  from typing import Dict
+
+
+  Vertex = collections.namedtuple("Vertex", "vertex_id x y")
+  def get_vertex(vertex_id: int, byte_data: bytes) -> Vertex:
+      byte_list = struct.unpack("<hh", byte_data)  # 2 signed shorts
+      make_list = [vertex_id] + list(byte_list)
+      return Vertex._make(make_list)
+
+  def read_bytes_as_vertexes(vertex_byte_data: bytes) -> Vertex:
+      byte_file = BytesIO(vertex_byte_data)
+      vertex_bytes = split_file(byte_file, 4)
+      counted_vertex_bytes = enumerate(vertex_bytes)
+      casted_counted_vertex_bytes = (get_vertex(i, current_byte) for i, current_byte in counted_vertex_bytes)
+      yield from casted_counted_vertex_bytes
+
+  def do_read():
+      vertex_data = retrieve_vertexes()
+      yield from read_bytes_as_vertexes(vertex_data.lumpdata)
+
+  def main():
+      build_lump_database()
+      for vertex in do_read():
+          print(vertex)
+          if vertex.vertex_id > 10:
+              break
+
+  if __name__ ==  "__main__":
+      main()
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+Vertex(vertex_id=0, x=1088, y=-3680)
+Vertex(vertex_id=1, x=1024, y=-3680)
+Vertex(vertex_id=2, x=1024, y=-3648)
+Vertex(vertex_id=3, x=1088, y=-3648)
+Vertex(vertex_id=4, x=1152, y=-3648)
+Vertex(vertex_id=5, x=960, y=-3648)
+Vertex(vertex_id=6, x=1280, y=-3552)
+Vertex(vertex_id=7, x=832, y=-3552)
+Vertex(vertex_id=8, x=1344, y=-3552)
+Vertex(vertex_id=9, x=704, y=-3552)
+Vertex(vertex_id=10, x=896, y=-3392)
+Vertex(vertex_id=11, x=928, y=-3392)
+#+end_example
+
+Now to read the lines
+#+BEGIN_SRC  python :python python3 :tangle line.py :results output :noweb yes
+  <<dependencies>>
+
+  from lump import build_lump_database, retrieve_lines
+  import pprint
+  import sqlite3
+  from io import BytesIO  # To read lump data like files.
+  from typing import Dict
+
+  """
+  typedef struct
+  {
+    short             v1;
+    short             v2; 
+    short             flags; 
+    short             special; 
+    short             tag; 
+    // sidenum[1] will be -1 if one sided
+    short             sidenum[2]; 
+  } PACKEDATTR maplinedef_t;
+  """
+
+      
+  Line = collections.namedtuple("Line", [ 'line_id',
+                                          'v1',
+                                          'v2',
+                                          'flags',
+                                          'special',
+                                          'tag',
+                                          'sidenum0',
+                                          'sidenum1'])
+
+  def get_line(line_id: int, byte_data: bytes) -> Line:
+      byte_list = struct.unpack("<hhhhhhh", byte_data)
+      make_list = [line_id] + list(byte_list)
+      return Line._make(make_list)
+
+  def read_bytes_as_lines(line_byte_data: bytes) -> Line:
+      byte_file = BytesIO(line_byte_data)
+      line_bytes = split_file(byte_file, 14)
+      counted_line_bytes = enumerate(line_bytes)
+      casted_counted_line_bytes = (get_line(i, current_byte) for i, current_byte in counted_line_bytes)
+      yield from casted_counted_line_bytes
+
+  def do_read():
+      line_data = retrieve_lines()
+      yield from read_bytes_as_lines(line_data.lumpdata)
+
+  def main():
+      build_lump_database()
+      for line in do_read():
+          print(line)
+          if line.line_id > 10:
+              break
+        
+  if __name__ ==  "__main__":
+      main()
+#+END_SRC
+
+#+RESULTS:
+: Line(line_id=0, v1=0, v2=1, flags=1, special=0, tag=0, sidenum0=0, sidenum1=-1)
+
+
+
+
+Now we can parse and unpack the binary data for what describes how the level actually looks. If only it was more queriable...
+#+BEGIN_SRC  python :python python3 :tangle level.py :results output :noweb yes
+  import lump
+  import line
+  import vertex
+  import sqlite3
+  import contextlib
+
+
+  def create_line_schema(conn):
+      conn.execute("DROP TABLE IF EXISTS Line")
+      conn.execute("""
+      CREATE TABLE IF NOT EXISTS Line(
+        line_id INTEGER PRIMARY KEY,
+        v1 INTEGER,
+        v2 INTEGER,
+        FOREIGN KEY(v1) REFERENCES Vertex (vertex_id),
+        FOREIGN KEY(v2) REFERENCES Vertex (vertex_id)
+      )""")
+
+  def create_vertex_schema(conn):
+      conn.execute("DROP TABLE IF EXISTS Vertex")
+      conn.execute("""
+      CREATE TABLE IF NOT EXISTS Vertex(
+         vertex_id INTEGER PRIMARY KEY,
+         x, y INTEGER
+      )""")
+
+  def _build_vertex_table(conn):
+      conn.executemany("""
+      INSERT INTO Vertex (vertex_id, x, y)
+      VALUES (:vertex_id, :x, :y)
+      """,vertex.do_read())
+
+  def _build_line_table(conn):
+      fix_line = lambda line_entry: dict(line_id=line_entry.line_id,
+                                         v1=line_entry.v1,
+                                         v2=line_entry.v2)
+      conn.executemany("""
+      INSERT INTO Line (line_id, v1, v2)
+      VALUES (:line_id, :v1, :v2)
+      """, map(fix_line, line.do_read()))
+
+  @contextlib.contextmanager
+  def awesome_manager(filename, foreign_keys=True):
+      with sqlite3.connect(filename) as conn:
+          if foreign_keys:
+              conn.execute("PRAGMA foreign_keys=ON")
+          yield conn
+
+  def build_level_data():
+      lump.build_lump_database()
+
+      with awesome_manager("leveldata.db", foreign_keys=False) as conn:
+          create_vertex_schema(conn)
+          create_line_schema(conn)
+    
+      with awesome_manager("leveldata.db") as conn:
+          _build_vertex_table(conn)
+          _build_line_table(conn)
+
+  def main():
+      build_level_data()
+  
+  if __name__ == "__main__":
+      main()
+#+END_SRC
+
+
+
+
+#+RESULTS:
+
+
+
+
+
+** Important points!
+   - So with the current SQLite format you can use SQL to query the level data and not need to create bespoke code just to access your code.
+   - The WAD format has many other aspects that SQLite could cater for, such as images (monster sprites, textures etc)
+
+#+begin_example
+Box(min_x=-768, min_y=-4864, max_x=4576, max_y=2816)
+(1088, -3680) (1024, -3680)
+(1024, -3680) (1024, -3648)
+(1088, -3648) (1088, -3680)
+(1152, -3648) (1088, -3648)
+(1024, -3648) (960, -3648)
+(1280, -3552) (1152, -3648)
+(960, -3648) (832, -3552)
+(1344, -3552) (1280, -3552)
+(832, -3552) (704, -3552)
+(896, -3392) (928, -3392)
+#+end_example
+
+
+* extra credit
+
+#+BEGIN_SRC  python :python python3 :tangle segment.py :results output :noweb yes
+  <<dependencies>>
+
+  from lump import build_lump_database, retrieve_segments
+  import pprint
+  import sqlite3
+  from io import BytesIO  # To read lump data like files.
+  from typing import Dict
+
+
+  Segment = collections.namedtuple("Segment", "segment_id v1 v2 angle line_id direction offset")
+  def get_segment(segment_id: int, byte_data: bytes) -> Segment:
+      byte_list = struct.unpack("<HHhHhh", byte_data)  # Unsigned short = H, short = h
+      make_list = [segment_id] + list(byte_list)
+      return Segment._make(make_list)
+
+  def read_bytes_as_segments(segment_byte_data: bytes) -> Segment:
+      byte_file = BytesIO(segment_byte_data)
+      segment_bytes = split_file(byte_file, 12)
+      counted_segment_bytes = enumerate(segment_bytes)
+      casted_counted_segment_bytes = (get_segment(i, current_byte) for i, current_byte in counted_segment_bytes)
+      yield from casted_counted_segment_bytes
+
+  def do_read():
+      segment_data = retrieve_segments()
+      yield from read_bytes_as_segments(segment_data.lumpdata)
+
+  def main():
+      build_lump_database()
+      for segment in do_read():
+          print(segment)
+          if segment.segment_id > 10:
+              break
+
+  if __name__ ==  "__main__":
+      main()
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+Segment(segment_id=0, v1=123, v2=124, angle=16384, line_id=152, direction=0, offset=0)
+Segment(segment_id=1, v1=125, v2=123, angle=-32768, line_id=157, direction=0, offset=0)
+Segment(segment_id=2, v1=124, v2=126, angle=0, line_id=158, direction=0, offset=0)
+Segment(segment_id=3, v1=126, v2=125, angle=-16384, line_id=384, direction=1, offset=0)
+Segment(segment_id=4, v1=290, v2=291, angle=-32768, line_id=360, direction=0, offset=0)
+Segment(segment_id=5, v1=291, v2=292, angle=16384, line_id=361, direction=0, offset=0)
+Segment(segment_id=6, v1=300, v2=301, angle=0, line_id=366, direction=0, offset=0)
+Segment(segment_id=7, v1=292, v2=300, angle=16384, line_id=370, direction=0, offset=0)
+Segment(segment_id=8, v1=304, v2=290, angle=-16384, line_id=371, direction=1, offset=0)
+Segment(segment_id=9, v1=385, v2=120, angle=4223, line_id=148, direction=0, offset=104)
+Segment(segment_id=10, v1=120, v2=119, angle=-16384, line_id=150, direction=0, offset=0)
+Segment(segment_id=11, v1=119, v2=120, angle=16384, line_id=150, direction=1, offset=0)
+#+end_example
+
+#+BEGIN_SRC sqlite :db leveldata.db
+.headers on
+.mode column
+SELECT * FROM Line WHERE line_id in (152, 157, 158, 366, 148); -- 148 
+#+END_SRC
+
+#+RESULTS:
+| line_id     v1          v2         |
+| ----------  ----------  ---------- |
+| 148         117         120        |
+| 152         123         124        |
+| 157         125         123        |
+| 158         124         126        |
+| 366         300         301        |
+
+#+BEGIN_SRC sqlite :db leveldata.db
+.headers on
+.mode column
+SELECT * FROM vertex WHERE vertex_id  IN (385, 120) ; -- 148 
+#+END_SRC
+
+#+RESULTS:
+| vertex_id   x           y          |
+| ----------  ----------  ---------- |
+| 120         1472        -2432      |
+| 385         1344        -2486      |
+
+
+#+BEGIN_SRC sqlite :db leveldata.db
+.headers on
+.mode column
+SELECT * FROM line WHERE v1 in (385, 120) or v2 in (385, 120);
+#+END_SRC
+
+#+RESULTS:
+| line_id     v1          v2         |
+| ----------  ----------  ---------- |
+| 148         117         120        |
+| 150         120         119        |
+| 154         120         121        |
+
+
+#+BEGIN_SRC  python :python ./virtualenv/bin/python :tangle pathmapper.py :results output :noweb yes
+  import level
+  from vertex import Vertex
+  import svgwrite
+  import draw_level
+  import itertools
+
+
+  def get_vertex(vertex_id):
+      with level.awesome_manager("leveldata.db") as conn:
+          cursor = conn.execute("""
+          SELECT
+            v1.vertex_id,
+            v1.x,
+            v1.y
+          FROM Vertex v1 
+          WHERE vertex_id = :vertex_id
+          """, {"vertex_id": vertex_id})
+          return Vertex._make(cursor.fetchone())
+
+
+  def get_paths_from(conn, line_id=0):
+      cursor = conn.execute("""
+      WITH 
+      RECURSIVE paths(point_vertices, v1) AS (
+         SELECT 
+              ''||v1,  v1 
+         FROM line WHERE line_id = ?
+      UNION ALL
+         SELECT 
+            p.point_vertices || '/' || l.v2 as point_vertices,
+            l.v2
+         FROM paths p
+         INNER JOIN line l ON l.v1 = p.v1
+         INNER JOIN vertex s on s.vertex_id = l.v2
+         WHERE '/' || p.point_vertices || '/'  not like '%/' || l.v2 || '/%'
+      )
+      SELECT * from paths;
+      """, (line_id,))
+      yield from cursor
+
+  import random
+  def random_colours():
+      return (random.randint(0,15) + 20,
+              random.randint(0,235) + 20,
+              random.randint(0,235) + 20 )
+
+
+  def random_colours():
+      return (255, 0, 0 )
+
+  def chunks(l, n):
+      """Yield successive n-sized chunks from l."""
+      for i in range(0, len(l), n):
+          yield l[i:i + n]
+
+    
+  def draw_line_between_verts(drawing, stroke, offset, *vert_ids):
+      vertexes = (get_vertex(vert_id) for vert_id in vert_ids)
+      prev = next(vertexes)
+      for curr in vertexes:
+          print(prev, curr)
+          x1, y1 = prev[1:]
+          x2, y2 = curr[1:]
+          x1 += offset[0]
+          x2 += offset[0]
+          y1 += offset[1]
+          y2 += offset[1]
+          drawing.add(drawing.line((x1,y1),
+                                   (x2,y2),
+                                   stroke=stroke,
+                                   stroke_width=10))
+          prev = curr
+                 
+
+  with level.awesome_manager('leveldata.db') as conn:
+      level.build_level_data()
+      box = draw_level.get_level_bounding_box()
+      drawing = svgwrite.Drawing("example2.svg", profile="full", debug=True)
+      draw_level.draw_level(drawing, draw_level.get_lines(), box)
+
+      red = (255, 0, 0)
+      paths = reversed(list(itertools.islice(get_paths_from(conn, 0), None, 10)))
+      for index, value in enumerate(paths):
+          route, _ = value
+          vertexes = route.split('/')
+          stroke = svgwrite.rgb(*red, '%')
+          offset = (-index * 40,-index * 40)
+          draw_line_between_verts(drawing, stroke, offset, *vertexes)
+          if index > 100:
+              break
+
+      green = (0, 255, 0)
+      paths = reversed(list(itertools.islice(get_paths_from(conn, 441), None, 10)))
+      for index, value in enumerate(paths):
+          route, _ = value
+          vertexes = route.split('/')
+          stroke = svgwrite.rgb(*green, '%')
+          offset = (-index * 40,-index * 40)
+          draw_line_between_verts(drawing, stroke, offset, *vertexes)
+          if index > 100:
+              break
+      drawing.save()
+    
+    
+#+END_SRC
+
+#+RESULTS:
+#+begin_example
+Vertex(vertex_id=0, x=1088, y=-3680) Vertex(vertex_id=1, x=1024, y=-3680)
+Vertex(vertex_id=1, x=1024, y=-3680) Vertex(vertex_id=2, x=1024, y=-3648)
+Vertex(vertex_id=3, x=1088, y=-3648) Vertex(vertex_id=0, x=1088, y=-3680)
+Vertex(vertex_id=4, x=1152, y=-3648) Vertex(vertex_id=3, x=1088, y=-3648)
+Vertex(vertex_id=2, x=1024, y=-3648) Vertex(vertex_id=5, x=960, y=-3648)
+Vertex(vertex_id=6, x=1280, y=-3552) Vertex(vertex_id=4, x=1152, y=-3648)
+Vertex(vertex_id=5, x=960, y=-3648) Vertex(vertex_id=7, x=832, y=-3552)
+Vertex(vertex_id=8, x=1344, y=-3552) Vertex(vertex_id=6, x=1280, y=-3552)
+Vertex(vertex_id=7, x=832, y=-3552) Vertex(vertex_id=9, x=704, y=-3552)
+Vertex(vertex_id=10, x=896, y=-3392) Vertex(vertex_id=11, x=928, y=-3392)
+Vertex(vertex_id=11, x=928, y=-3392) Vertex(vertex_id=12, x=928, y=-3360)
+Vertex(vertex_id=12, x=928, y=-3360) Vertex(vertex_id=13, x=896, y=-3360)
+Vertex(vertex_id=13, x=896, y=-3360) Vertex(vertex_id=10, x=896, y=-3392)
+Vertex(vertex_id=14, x=1184, y=-3392) Vertex(vertex_id=15, x=1216, y=-3392)
+Vertex(vertex_id=15, x=1216, y=-3392) Vertex(vertex_id=16, x=1216, y=-3360)
+Vertex(vertex_id=16, x=1216, y=-3360) Vertex(vertex_id=17, x=1184, y=-3360)
+Vertex(vertex_id=17, x=1184, y=-3360) Vertex(vertex_id=14, x=1184, y=-3392)
+#+end_example
+
+*  extra 2 images
+  #+BEGIN_SRC sqlite :db waddata.db
+  SELECT count (1) FROM LumpInfo;
+  #+END_SRC
+
+  #+RESULTS:
+  : 11
+
+  | CREATE TABLE LumpInfo( |   |
+  | lump_id INTEGER        |   |
+  | position INTEGER       |   |
+  | size INTEGER           |   |
+  | name VARCHAR           |   |
+  | lumpdata BLOB          |   |
+  | );                     |   |
+
+#+BEGIN_SRC python :python ./virtualenv/bin/python :results output :noweb yes
+from lump import build_all_lumps_db__testing
+build_all_lumps_db__testing()
+#+END_SRC
+
+#+BEGIN_SRC sqlite :db alllumps.db
+SELECT 
+       lump_id,
+       position,
+       size,
+       name,
+       length(lumpdata)
+    FROM LumpInfo l WHERE lump_id = 443 ; -- name like '%MUS%';
+
+#+END_SRC
+
+#+RESULTS:
+| 443 | 2176816 | 2976 | M_MUSVOL | 2976 |
+
+
+#+BEGIN_SRC sqlite :db alllumps.db
+  WITH 
+  range AS (
+    SELECT 
+       lump_id,
+       position,
+       size,
+       name,
+       length(lumpdata)
+    FROM LumpInfo l 
+    WHERE l.lump_id >= (SELECT lump_id FROM LumpInfo WHERE LumpInfo.name LIKE 'S_START%') AND
+          l.lump_id <= (SELECT lump_id FROM LumpInfo WHERE LumpInfo.name LIKE 'S_END%') 
+  )
+  SELECT * FROM Range Where name like '%OO%';
+#+END_SRC
+
+
+
+| CREATE TABLE LumpInfo( |   |
+| lump_id INTEGER        |   |
+| position INTEGER       |   |
+| size INTEGER           |   |
+| name VARCHAR           |   |
+| lumpdata BLOB          |   |
+| );                     |   |
+
+
+#+BEGIN_SRC python :python ./virtualenv/bin/python :results output :noweb yes
+  from lump import build_all_lumps_db__testing, make_custom_cursor
+  build_all_lumps_db__testing()
+
+  with make_custom_cursor("alllumps.db") as conn:
+      cur = conn.execute("SELECT * FROM LumpInfo WHERE lump_id=1035")
+      #print(cur.fetchall())
+      lump_info = cur.fetchone()
+      with open('datafile.img', 'wb') as datafile:
+          datafile.write(lump_info.lumpdata)
+#+END_SRC
+
+#+RESULTS:
+
