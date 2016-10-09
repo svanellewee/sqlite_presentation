@@ -1,0 +1,982 @@
+<!doctype html>
+<html>
+    <head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+	<title>reveal.js</title>
+
+	<link rel="stylesheet" href="revealjs/css/reveal.css">
+	<link rel="stylesheet" href="revealjs/css/theme/sky.css">
+
+	<!-- Theme used for syntax highlighting of code -->
+	<link rel="stylesheet" href="revealjs/lib/css/zenburn.css">
+
+	<!-- Printing and PDF exports -->
+	<script>
+	 var link = document.createElement( 'link' );
+	 link.rel = 'stylesheet';
+	 link.type = 'text/css';
+	 link.href = window.location.search.match( /print-pdf/gi ) ? 'revealjs/css/print/pdf.css' : 'revealjs/css/print/paper.css';
+	 document.getElementsByTagName( 'head' )[0].appendChild( link );
+	</script>
+	<!--  bar chart demo styling -->
+	<style>
+	 
+         .chart rect {
+             fill: #63b6d0;
+         }
+
+         .chart text {
+             fill: white;
+             font: 10px sans-serif;
+             text-anchor: end;
+         }
+
+         text {
+             font: 10px sans-serif;
+         }
+        </style>	
+    </head>
+    <body>
+	<div class="reveal">
+	    <div class="slides">
+		<section>
+		    <h2>Some Less Obvious Uses of SQLite</h2>
+		    <h3></h3>
+		    <p>
+			<small>Stephan van Ellewee </small>
+		    </p>
+		</section>
+
+		<section>
+		    <p>Who I am</p>
+		    <ul>
+			<li class="fragment">Python Developer</li>
+			<li class="fragment">Works at Takealot</li>
+			<li class="fragment">Catalogue team
+			    <ul class="fragment">
+				<li>Processing product information (CSV? XML?)</li>
+				<li>Storage</li>
+			    </ul>
+			</li>
+			
+		    </ul>
+		</section>
+
+		<section>
+		    <h3>Discussion points</h3>
+		    <ul>
+			<li>Who uses SQlite it?/What is it?</li>
+			<li>More usecases, examples</li>
+		    </ul>
+		</section>
+
+		
+		<section> 
+		    <h3>Who uses SQLite?</h3>
+		    <ul>
+			<li>Airbus</li>
+			<li>Skype</li>
+			<li>Mozilla</li>
+			<li>Apple</li>
+			<li>many others...</li>
+		    </ul>  <!-- Ubiquitous -->
+		</section>
+
+		<section>
+		    <img style="background:white" data-src="media/A350_XWB.jpg">
+		</section>
+		
+		<section>
+		    
+		    <section>
+			<h3>What is SQLite?</h3>
+			<ul>
+			    <li class="fragment">Uses a single file for the database</li>
+			    <li class="fragment">Suited for client side use</li>
+			    <li class="fragment">Just a C library </li>
+			    <li class="fragment">Integrated into python <pre><code>import sqlite3</code></pre></li>
+			    <li class="fragment">Dynamically typed</li>
+			</ul>
+		    </section>
+
+		    <section>
+			<p>SQLite is also..</p>
+			<ul>
+			    <li class="fragment"><i>the most used database engine in the world</i></li>
+			    <li class="fragment">does not compete with Postgres/MySQL</li>
+			    <li class="fragment">"competes" with (f)open</li>
+			</ul>
+		    </section>
+
+		    <section>
+			<h3>In-Memory database</h3>
+			<pre><code>
+       import sqlite3
+
+       with sqlite3.connect(":memory:") as conn:
+	   # some database creation..
+	   conn.execute("CREATE TABLE SomeTable (id, Name)");
+	   cursor = conn.execute("""
+	   INSERT INTO SomeTable (id, Name)
+	   VALUES (?, ?)
+	   """, (12, "Stephan"))
+
+       # after contextmanager database disappears
+			</code></pre>
+			<p>Note, the lack of required types</p>
+		    </section>
+
+		    <section>
+			<h3>File-based database</h3>
+			<pre><code>
+       import sqlite3
+
+       # creates some_file.db on HDD
+       with sqlite3.connect("some_file.db") as conn: 
+	   # some database creation..
+	   conn.execute("CREATE TABLE SomeTable (id, Name)");
+	   cursor = conn.execute("""
+	   INSERT INTO SomeTable (id, Name)
+	   VALUES (?, ?)
+	   """, (12, "Stephan"))
+
+       # after contextmanager database PERSISTS!
+			</code></pre>
+		    </section>
+
+
+		    <section>
+			<h3>Foreign Keys</h3>
+			<pre><code>
+    import sqlite3
+
+    with sqlite3.connect("demo.db") as conn:
+
+	# enable foreign key constraints
+	conn.execute("PRAGMA foreign_keys=ON")
+
+	# some database creation..
+	conn.execute("CREATE TABLE SomeTable (id PRIMARY KEY, name);")
+
+	# some database changes
+			</code></pre>
+		    </section>
+
+		</section>
+
+		<section>
+		    <section>
+			<h3>Benefits over flat files?</h3>
+			<ul>
+			    <li>No newline issues</li>
+			    <li>BLOBS</li>
+			    <li>140TB</li>
+			    <li>Great query SQL support</li>
+			</ul>
+			<a href="#" class="navigate-down"></a>
+		    </section>
+		    <section>
+			<h3> SQL support  </h3>
+			<p >example:</p>
+			<p class="fragment">SQLite (et al) supports Common Table Expressions (CTE's)</p>
+			<ul>
+			    <li class="fragment">CTE's are like derived tables </li>
+			    <li class="fragment">Syntax that helps you declare complex queries</li>
+			    <li class="fragment">Allows recursive calls even!</li>
+			</ul>
+		    </section>
+		    <section>
+			<span>A plain CTE</span>
+			<pre><code>
+
+      WITH demo_0 AS (SELECT *
+                        FROM runs
+                       WHERE fileName = 'demo_0_250000.csv')
+      SELECT * FROM demo_0;
+
+			</code></pre>
+		    </section>
+
+		    <section>
+			<span>You can expand on it</span>
+			<pre><code>         WITH demo_0 AS (SELECT *
+		           FROM runs
+                          WHERE fileName = 'demo_0_250000.csv'),
+     sqlite3_results AS (SELECT *
+                           FROM demo_0
+		     INNER JOIN results
+                             ON results.idRun=demo_0.idRun
+		          WHERE demo_0.pyTest='sqlite3_01.py'),
+      simple_results AS (SELECT *
+                           FROM demo_0
+		     INNER JOIN results ON results.idRun=demo_0.idRun
+		          WHERE demo_0.pyTest='simple.py'),
+               sizes AS (SELECT (SELECT COUNT(1)
+                                 FROM sqlite3_results) size1 ,
+  		                (SELECT COUNT(1)
+                                 FROM simple_results) size2)
+            SELECT * from sizes;  -- use anything above ^
+			</code></pre>
+		    </section>
+		    
+		    <section>
+			<span>Recursive Fibonacci</span>
+			<pre><code>	 
+	   WITH RECURSIVE fibo (num, next_num) AS (
+		     VALUES (0, 1)          -- initial state
+		     UNION ALL
+		     SELECT                 -- what happens next
+			   fibo.next_num,
+			   fibo.next_num + fibo.num 
+		     FROM fibo              -- recursion!
+		  )
+	   SELECT num FROM fibo LIMIT 10
+
+			</code></pre>
+			<p>   
+			    results in 0,1,1,2,3,5,8,13,21,34
+			</p>
+			<a href="#" class="navigate-down"></a>
+			
+		    </section>
+
+		    
+		    
+		    <section>
+			<p>Go down a hierarchy with CTE's</p>
+			<pre><code>
+              CREATE TABLE IF NOT EXISTS org  (
+                  name TEXT PRIMARY KEY,
+                  boss TEXT REFERENCES org
+              ) ; 
+
+              INSERT INTO org VALUES('Alice',NULL); 
+              INSERT INTO org VALUES('Bob','Alice');  
+              INSERT INTO org VALUES('Cindy','Alice'); 
+              INSERT INTO org VALUES('Dave','Bob');
+              INSERT INTO org VALUES('Emma','Bob');    
+              INSERT INTO org VALUES('Fred','Cindy');
+              INSERT INTO org VALUES('Gail','Cindy');
+
+			</code></pre>
+			<a href="#" class="navigate-down"></a>
+			
+		    </section>
+		    <section>
+			<p>Go down a hierarchy with CTE's</p>
+			<p>Who works for Alice?</p>
+			<pre><code>
+             WITH RECURSIVE works_for_alice(name, level) AS (
+                    VALUES ('Alice', 0) 
+                     UNION ALL
+                    SELECT org.name, under_alice.level + 1
+                      FROM org
+                      JOIN under_alice
+                        ON org.boss = works_for_alice.name
+                   )
+             SELECT substr('..........', 1, level * 3) || name
+             FROM works_for_alice;
+			</code></pre>
+			<a href="#" class="navigate-down"></a>
+			
+		    </section>
+		    <section>
+			<p>Results in</p>
+			<pre><code>  			
+			| Alice      |
+			| ...Bob     |
+			| ...Cindy   |
+			| ......Dave |
+			| ......Emma |
+			| ......Fred |
+			| ......Gail |
+
+			</code></pre>
+			<a href="#" class="navigate-down"></a>
+
+		    </section>
+
+		    <section>
+			<p>Summary: SQLite has Great SQL support</p>
+		    </section>
+		</section>
+		
+		<section>
+		    <h2>SQLite</h3>
+			<p>in terms of </p>
+			<ul>
+			    <li><i>an "Application File Format"</i></li>
+			    <li>for data manipulation</li>
+			    <li>for enhanced automation scripting</li>
+			</ul>
+		</section>
+		
+		
+		<section>
+		    <section>
+			<h3>Application File Format</h3>
+			<ul>
+			    <li>A way to persist state</li>
+			    <li>Examples (XLSX, PDF, .git)</li>
+			    <li>SQLite fits into this category</li>
+			</ul>
+		    </section>
+		    
+		    <section>
+			<h3>SQLIte as Application File Format</h3>
+			<ul>
+			    <li>binary data</li>
+			    <li>foreign keys</li>
+			</ul>
+			<a href="#" class="navigate-down"></a>
+		    </section>
+
+		    <section>
+			<h3>Case Study: Doom (1993)</h3>
+			<img style="background:white" data-src="media/doomsnap.png">
+		    </section>
+		    
+		    <section>
+			<h3>Case Study: Doom (1993)</h3>
+			<ul>
+			    <li>WAD files</li>
+			    <li class="fragment">"Where's All the Data"</li>
+			    <li class="fragment">Stores arbitrary binary data in "Lump" entries</li>
+			</ul>
+			<a href="#" class="navigate-down"></a>
+		    </section>
+
+		    <section>
+			<h3>WAD File Structure</h3>
+			<ul>
+			    <li>Header</li>
+			    <li class="fragment">Index</li>
+			    <li class="fragment">LumpData </li>
+			    <li class="fragment">more LumpData </li>
+			    <li class="fragment">yet more LumpData </li>
+			    <li class="fragment">... </li>
+			    
+			</ul>
+			<a href="#" class="navigate-down"></a>
+		    </section>
+
+		    <section>
+			<h3>for level in WADfile</h3>
+			<ul>
+			    <li> get the <i>vertexes binary data (lump)</i></li>
+			    <li> get the <i>lines binary data (lump)</i></li>
+			</ul>			
+		    </section>
+		    <section>
+			<p>Convenient Python libs:</p>
+			<ul>
+			    <li>collections.namedtuple - tuples with named fields</li>
+			    <li>struct - interprets strings as packed binary data </li>
+			</ul>
+		    </section>
+		    <section>
+			<p>Batteries included</p>
+			<pre><code>
+          import collections
+	  Pixel = collections.namedtuple("Pixel","x y colour")
+          new_pixel = Pixel._make([10, 20, "RED"])
+          new_pixel.x       # 10,    same as new_pixel[0]
+          new_pixel.colour  # "RED"
+
+          import struct
+          byte_list = struct.unpack("&lthhh", binary_string)
+          another_pixel = Pixel._unpack(byte_list)
+          # use new_pixel, another_pixel
+
+			</code></pre>
+
+		    </section>
+		    <section>
+			<h3>SQLite Retrofit</h3>
+			<p>Parse Vertex binary data/lump</p>
+			<pre><code>
+      byte_list = struct.unpack("&lthh", byte_data)
+      Vertex = collections.namedtuple("Vertex", "vertex_id x y")
+			</code></pre>
+			
+			<p>Parse Line binary data/lump</p>
+			<pre><code>
+      byte_list = struct.unpack("&lthhhhhhh", byte_data)
+      Line = collections.namedtuple("Line", "line_id v1 v2...")
+			</code></pre>
+			<a href="#" class="navigate-down"></a>
+			
+		    </section>
+		    
+		    <section>
+			<h3>SQLite Retrofit</h3>
+			<p>Store all WAD data into a SQLite db</p>
+			<pre><code>          CREATE TABLE IF NOT EXISTS Vertex(
+                 vertex_id INTEGER PRIMARY KEY,
+                 x, y INTEGER
+          );
+
+
+          CREATE TABLE IF NOT EXISTS Line(
+                line_id INTEGER PRIMARY KEY,
+                v1 INTEGER,
+                v2 INTEGER,
+                FOREIGN KEY(v1) REFERENCES Vertex (vertex_id),  
+                FOREIGN KEY(v2) REFERENCES Vertex (vertex_id)
+          );
+
+			</code></pre>
+			<a href="#" class="navigate-down"></a>
+		    </section>
+
+
+		    <section>
+			<h3>SQLite Retrofit</h3>
+			<p>Using SQL you can create very powerful queries</p>
+			<ul>
+			    <li>Bounds checks (view window)</li>
+			    <li>Line drawing</li>
+			</ul>
+			<a href="#" class="navigate-down"></a>
+		    </section>
+
+		    <section>
+			<h3>SQLite Retrofit</h3>
+			<p>Bounds Checking</p>
+			<pre><code>     Box = collections.namedtuple("Box",
+                                  "min_x min_y width height")
+
+     def get_level_bounding_box(conn):
+             """
+             Postion view window to fit all points
+             """
+	     cursor = conn.execute("""
+	     SELECT
+		 MIN(x),
+		 MIN(y),
+		 MAX(x) - MIN(x) as width,
+		 MAX(y) - MIN(y) as height
+	     FROM Vertex
+	     """)
+	     return Box._make(cursor.fetchone())
+
+			</code></pre>
+			<a href="#" class="navigate-down"></a>
+		    </section>
+
+
+		    <section>
+			<h3>SQLite Retrofit</h3>
+			<p>Line drawing</p>
+			<pre><code>    Vertex = collections.namedtuple("Vertex", "vertex_id x y")
+    def get_lines(conn):
+	    cursor = conn.execute("""
+	    SELECT
+	      ld.line_id,                -- line reference
+	      v1.vertex_id, v1.x, v1.y,  -- vertex 1
+	      v2.vertex_id, v2.x, v2.y   -- vertex 2
+	    FROM Line ld
+	    INNER JOIN Vertex v1 ON v1.vertex_id=ld.v1
+	    INNER JOIN Vertex v2 ON v2.vertex_id=ld.v2;
+	    """)
+	    def unpack(result):
+		line_id, *vertexes = result
+		v1 = Vertex._make(vertexes[:3])
+		v2 = Vertex._make(vertexes[3:])
+		return line_id, v1, v2
+	    yield from (unpack(result) for result in cursor)
+
+			</code></pre>
+			<a href="#" class="navigate-down"></a>
+		    </section>
+
+		    <section>
+			<h3>Generated from SQLite</h3>
+			<img style="background:white" data-src="demo-code/doom-demo/example.svg">
+			<!-- width="178" height="238" -->
+			<a href="#" class="navigate-down"></a>
+			
+		    </section>
+
+
+
+		    <section>
+			<h3>SQLite and WAD</h3>
+			<ul>
+			    <li>SQLite can be used to store world state</li>
+			    <li>Binary data also supported:
+				<pre><code>some_binary_data = ...
+conn.execute("""
+ CREATE TABLE BinaryStuff (
+   stuff_id INTEGER PRIMARY KEY AUTOINCREMENT,
+   name TEXT,
+   some_binary_data BLOB   -- BINARY DATA!
+)
+""")
+
+conn.execute("""
+INSERT INTO BinaryStuff ( name, some_binary_data )
+VALUES (?)
+""", (name, sqlite3.Binary(some_binary_to_insert))
+				</code></pre></li>
+			    <li>SQL can act as your file access API</li>
+			    <li>No more spending time writing, debugging, maintaining your own thing</li>
+			</ul>
+		    </section>
+		</section>
+		<section>
+		    <section>
+			<h3>Manipulation of Feed data</h3>
+			<p>We have a feed CSV file</p>
+			<ul>
+			    <li>Products many Suppliers</li>
+			    <li>Suppliers only one Product</li>
+			    <li>One (product) has many (suppliers)</li>
+			    <li>Denoted by
+				<ul>
+				    <li>idProduct (Products)</li>
+				    <li>idSupplier (Suppliers)</li>
+				</ul>			    
+			    </li>
+			</ul>
+			<a href="#" class="navigate-down"></a>
+
+		    </section>
+		    <section>
+			<h3>Requirement</h3>
+			<ul>
+			    <li>Use the following CSV structure</li>
+			    <pre><code>
+	  idProduct, idSupplier
+	  543556,    391595
+	  543556,    630810
+	  543556,    554876
+	  543556,    1338545
+	  543556,    1436332
+	  543556,    1667998
+	  543556,    1850857
+	  543556,    274867
+	  543556,    1819135
+			    </code></pre>
+			    <li>Batch suppliers per product</li>
+			</ul>
+			<a href="#" class="navigate-down"></a>
+
+		    </section>
+		    <section>
+			<h3>Simple Python solution</h3>
+			<pre><code>
+      @contextlib.contextmanager
+      def get_datastore():
+         yield collections.defaultdict(set)
+
+      def get_suppliers_for_product(conn):
+         return conn.items()
+
+      def main(code_name, file_name):
+         # Just a plain dictionary of set-values
+         with get_datastore() as conn:
+            do_csv_parse(conn, file_name)
+
+            for product, supplier in get_suppliers_for_product(conn):
+                output_phase(product, supplier)
+
+			</code></pre>
+			<a href="#" class="navigate-down"></a>
+
+		    </section>
+
+		    <section>
+			<h3>Simple Python solution</h3>
+			<pre><code>
+      def do_csv_parse(conn, file_name):
+          lookup = conn # to match the SQL api
+          with open(file_name, "r") as stockfile:
+              reader = csv.DictReader(stockfile)
+              for row in reader:
+                  # Not Lazy
+                  lookup[row['idProduct']].add(row['idSupplier']) 
+			</code></pre>
+			<p>Process CSV and add into dictionary</p>
+			<a href="#" class="navigate-down"></a>
+		    </section>
+
+		</section>
+		<section>
+
+		    <section>
+			<h3>SQLite Based Solution</h3>
+			<pre><code>
+      CREATE TABLE IF NOT EXISTS ProductSuppliers (
+        idProduct INTEGER,
+        idSupplier INTEGER
+      );
+			</code></pre>
+			<a href="#" class="navigate-down"></a>
+		    </section>
+
+		    <section>
+			<h3>SQLite Based Solution</h3>
+			<p>Replace the do_csv_parse with
+			    <pre><code>
+    def do_csv_parse(conn, file_name):
+
+        with open(file_name, "r") as stockfile:
+            reader = csv.DictReader(stockfile)
+            conn.executemany("""
+  	    INSERT INTO ProductSuppliers (idProduct, idSupplier)
+	         VALUES (:idProduct, :idSupplier)
+            """, reader)
+			    </code></pre>
+		    </section>
+		    
+
+
+		    <section>
+			<h3>SQLite3 Python solution</h3>
+			<pre><code>    def get_suppliers_for_product(conn):
+        cursor = conn.execute("""
+        SELECT idProduct, 
+               GROUP_CONCAT(DISTINCT(idSupplier))
+          FROM ProductSuppliers
+      GROUP BY idProduct;
+        """)
+        for product_id, supplier_string in cursor:
+             yield (product_id, supplier_strring.split(',')
+			    
+    def main(code_name, file_name, run_id):
+        with sqlite3.connect(":memory:") as conn:
+            do_csv_parse(conn, sys.argv[1])  # "stockfile-orig.csv"
+
+            supplier_source = get_suppliers_for_product(conn)
+            for product, supplier in supplier_source:
+                output_phase(product, supplier)
+			    
+			</code></pre>
+			<a href="#" class="navigate-down"></a>
+
+		    </section>
+
+		    <section>
+			<h3>SQLite3 Python solution</h3>
+			<pre><code>    def get_suppliers_for_product(conn):
+        cursor = conn.execute("""
+        SELECT idProduct, 
+               GROUP_CONCAT(DISTINCT(idSupplier))
+          FROM ProductSuppliers
+      GROUP BY idProduct;
+        """)
+        for product_id, supplier_string in cursor:
+             yield (product_id, supplier_strring.split(',')
+			    
+    def main(code_name, file_name, run_id):
+        with sqlite3.connect("disk.db") as conn:
+            do_csv_parse(conn, sys.argv[1])  # "stockfile-orig.csv"
+
+            supplier_source = get_suppliers_for_product(conn)
+            for product, supplier in supplier_source:
+                output_phase(product, supplier)
+			    
+			</code></pre>
+			<a href="#" class="navigate-down"></a>
+
+		    </section>
+		    
+		    
+		</section>
+		<section>
+		    <section>
+			<h3>3 Approaches Total</h3>
+			<ul>
+			    <li>Simple Python Dictionary</li>
+			    <li>In Memory SQLite</li>
+			    <li>File based SQLite</li>
+			</ul>
+			<a href="#" class="navigate-down"></a>
+		    </section>
+		    
+		    <section>
+			<h3>Comparison</h3>
+			<p> Duration (s)</p>
+			<svg id="duration_visualisation" width="1000" height="500"></svg>
+			<!-- <svg class="chart"></svg>			 -->
+			<a href="#" class="navigate-down"></a>
+		    </section>
+
+		    <section>
+			<h3>Comparison</h3>
+			<p> Average Memory Used (MB)</p>
+			<svg id="memory_visualisation" width="1000" height="500"></svg>
+			<a href="#" class="navigate-down"></a>
+		    </section>
+
+		    <section>
+			<h3>Summary</h3>
+			<ul>
+			    <li>Speed: SQLite < python dict</li>
+			    <li>Memory: SQLite < python dict</li>
+			    <li>SQLite can persist</li>
+			    <li>SQLite can be queried</li>
+			</ul>
+		    </section>
+
+		</section>
+
+		<section>
+		    
+		    <section>
+			<h3>Enhanced automation scripting</h3>
+			<ul>
+			    <li>Problem description</li>
+			    <li>What we currently have</li>
+			    <li>Highlight and contrast</li>
+			</ul>
+		    </section>
+		    
+		    <section>
+			<h3>Problem: Book Feeds</h3>
+			<ul>
+			    <li>Need images from feed</li>
+			    <li>All images in feed</li>
+			    <li>only new ones</li> <!-- though -->
+			</ul>
+		    </section>
+
+		    <section>
+			<h3>BASH Image Fetcher</h3>
+			<ul>
+			    <li>Written in BASH</li>
+			    <li>Really hard to maintain</li>
+			</ul>
+		    </section>
+
+		    <section>
+			<h3>BASH Image Fetcher</h3>
+			<ul>
+			    <li>initialization    <i class="fragment" style="color:blue">(checks file existence)</i></li>
+			    <li>generation of ftp scripts <i class="fragment" style="color:blue">(they're offsite images)</i></li>  <!-- very meta.  -->
+			    <li>compare with previous ftp scripts <i class="fragment" style="color:blue">(ala left join)</i></li>
+			    <li>on difference, call ftp, in batches </li>
+			</ul>
+		    </section>
+
+		    <section>
+			<h3>Some Bash Greatest hits</h3>
+			<pre><code>
+    # compare files and ...
+   comm -13 <(zcat $last_image_list) <(zcat $today_image_list) | \   
+   gzip -c - >>$today_diff_list   # pipe directly into new list
+			</code></pre>
+			
+			<div class="fragment">
+			    <p>...vs SQL</p>
+			    
+			    <pre><code>	INSERT INTO today_diff_list 
+	     SELECT new_image_list.isbn,
+		    new_image_list.filename
+	       FROM new_image_list 
+	  LEFT JOIN last_image_list
+		 ON last_image_list.isbn= new_image_list.isbn 
+	      WHERE last_image_list.filename IS NULL
+	   ORDER BY new_image_list.isbn;  -- now go do the ftp			    </code></pre>
+			</div>
+		    </section>
+		    
+		    <section>
+			<h3>Some Bash Greatest Hits</h3>
+			<p>FTP Batching</p>
+			<pre><code>
+    function run_ftp() {
+        WINDOWOFF=$1
+        WINDOWLEN=$2
+        zcat $today_diff_list  | head -n $[ $WINDOWOFF +1 ]  | tail -n $WINDOWLEN  | xargs  curl -u $FTP_USER:$FTP_PASSWD 
+
+        FILES_TO_USE=*unprocessed.jpg
+        if [ ! -n "$(ls $DOWNLOAD_DIR$FILES_TO_USE)" ]; then
+           echo "No files to process"
+           exit 1
+        fi
+        echo "Do Some Conversion."
+        # ... etc etc
+        
+    }
+			</code></pre>
+		    </section>
+
+		    
+		    <section>
+			<p>The effective bash magic</p>
+			<pre><code>	   zcat $today_diff_list  | \        
+	   head -n $[ $window_offset +1 ]  | \   
+	   tail -n $window_length  | \           
+	   xargs curl ...                    # do the ftp			</code></pre>
+			<div class="fragment">
+			    <p>...vs SQL</p>
+			    
+			    <pre><code> 	              SELECT isbn, filename
+                        FROM today_diff_list
+		    ORDER BY isbn
+		       LIMIT :window_length
+		      OFFSET :window_offset;  -- now go do the ftp			     </code></pre>
+			</div>
+		    </section>
+		    
+		    <section>
+			<h3>Critique</h3>
+			<ul>
+			    <li>SQL probably not very terse</li>
+			    <li class="fragment">...but it's  <i>explicit</i></li>
+			    <li class="fragment">...also you can support <i>continuing</i></li>
+			</ul>
+			<pre class="fragment"><code>		 ALTER TABLE today_diff_list
+		  ADD COLUMN was_updated BOOL
+		     DEFAULT FALSE;			</code></pre>
+		    </section>
+		</section>
+		
+		<section>
+		    <h3>Some take aways</h3>
+		    <ul>
+			<li>SQLite is a very underused library</li>
+			<li>Python can improve it's use
+			    <ul>
+				<li>context managers,</li>
+				<li>namedtuples</li>
+			    </ul>
+			</li>
+		    </ul>
+		</section>
+		<section>
+		    <pre><code>
+	  @contextlib.contextmanager
+	  def my_manager(filename, foreign_keys=True):
+	      with sqlite3.connect(filename) as conn:
+		  if foreign_keys:
+		      conn.execute("PRAGMA foreign_keys=ON")
+		  yield conn
+		    </code></pre>
+		    
+		    <p>Start creating your own ORM...</p>
+		    <pre><code>
+	  Pixel = collections.namedtuple("Pixel","x y colour")
+
+	  with my_manager("some_pixel_database.db") as db:          
+              new_pixel = Pixel._make(cursor.fetchone())
+              # do something with your pixel
+		    </code></pre>
+		    
+		</section>
+
+		<section>
+		    <p> Thank you!</p>
+		    <!-- <i class="fragment">..psst, we're hiring come say 'hi' at our stand</i> -->
+		</section>
+
+		<section>
+		    <h3>Interesting level queries</h3>
+		    <span class="fragment">Note, I said interesting, maybe not useful</span>
+		    <pre><code>
+  WITH RECURSIVE paths(point_vertices, v1) AS (
+      SELECT '',  v1 FROM line WHERE line_id = 0
+      UNION ALL
+      SELECT 
+             p.point_vertices || '/' || l.v2 as point_vertices,
+  	     l.v2
+     FROM paths p
+     INNER JOIN line l ON l.v1 = p.v1
+     INNER JOIN vertex s on s.vertex_id = l.v2
+     WHERE '/' || p.point_vertices || '/'  not like '%/' || l.v2 || '/%'
+   )
+  SELECT * from paths LIMIT 10;
+		    </code></pre>
+		</section>
+		<section>
+		    <p>you get paths on the walls!</p>
+		    <pre><code>
+	  | point_vertices         | v1 |
+	  |                        |  0 |
+	  | /1                     |  1 |
+	  | /1/2                   |  2 |
+	  | /1/2/5                 |  5 |
+	  | /1/2/5/7               |  7 |
+	  | /1/2/5/7/9             |  9 |
+	  | /1/2/5/7/9/45          | 45 |
+	  | /1/2/5/7/9/45/52       | 52 |
+	  | /1/2/5/7/9/45/52/47    | 47 |
+	  | /1/2/5/7/9/45/52/47/48 | 48 |
+		    </code></pre>
+		</section>
+		
+		<section>
+		    <h3>Map</h3>
+		    <p>CTE iterations represented in <span style="color:red;background:white">red</span> and <span style="color:#00ff00;background:white">green</span></p>
+		    <img style="background:white" data-src="demo-code/doom-demo/example2.svg">
+		    <!-- width="178" height="238" -->
+		    <a href="#" class="navigate-down"></a>
+
+		</section>
+
+		
+		<!-- </section>
+		   -->
+	    </div>
+	</div>
+
+	<script src="./revealjs/lib/js/head.min.js"></script>
+	<script src="./revealjs/js/reveal.js"></script>
+
+	<script>
+	 // More info https://github.com/hakimel/reveal.js#configuration
+	 Reveal.initialize({
+	     history: true,
+
+	     // More info https://github.com/hakimel/reveal.js#dependencies
+	     dependencies: [
+		 { src: './revealjs/plugin/markdown/marked.js' },
+		 { src: './revealjs/plugin/markdown/markdown.js' },
+		 { src: './revealjs/plugin/notes/notes.js', async: true },
+		 { src: './revealjs/plugin/highlight/highlight.js', async: true, callback: function() { hljs.initHighlightingOnLoad(); } }
+	     ]
+	 });
+	</script>
+
+	<script src="./d3/d3.min.js"></script>
+	<script src="./media/duration.js"></script>
+	<script src="./media/memory.js"></script>
+	<script type="text/javascript">
+	 //------ code to show D3 Bar Chart on First Slide-------
+	 var data = [44, 28, 15, 16, 23, 5];
+	 var width = 420,
+	     barHeight = 20;
+
+	 var x = d3.scaleLinear()
+		   .domain([0, d3.max(data)])
+		   .range([0, width]);
+	 /* var x = d3.scale.linear()
+	    .domain([0, d3.max(data)])
+	    .range([0, width]);
+	  */
+	 var chart = d3.select(".chart")
+		       .attr("width", width)
+		       .attr("height", barHeight * data.length);
+
+	 var bar = chart.selectAll("g")
+			.data(data)
+			.enter().append("g")
+			.attr("transform", function(d, i) { return "translate(0," + i * barHeight + ")"; });
+
+	 bar.append("rect")
+	    .attr("width", x)
+	    .attr("height", barHeight - 1);
+
+	 bar.append("text")
+	    .attr("x", function(d) { return x(d) - 3; })
+	    .attr("y", barHeight / 2)
+	    .attr("dy", ".35em")
+	    .text(function(d) { return d; });
+
+	</script>
+    </body>
+</html>
