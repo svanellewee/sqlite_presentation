@@ -1,1 +1,1 @@
-# sqlite_presentation
+# SQLite presentation PyCON  2016
